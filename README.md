@@ -3,6 +3,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/Domi-cc/phonak-assistant/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Domi-cc/phonak-assistant/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="#where-it-stands"><img alt="status: measurement app" src="https://img.shields.io/badge/status-measurement%20app-f59e0b"></a>
   <img alt="Android 17" src="https://img.shields.io/badge/Android-17%20(API%2037)-3DDC84?logo=android&logoColor=white">
   <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?logo=kotlin&logoColor=white">
