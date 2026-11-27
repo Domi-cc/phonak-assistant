@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lara im Ohr</string>
+    <string name="channel_session">Sitzung</string>
+    <string name="notification_session_title">Lara spricht mit dem Hörgerät</string>
+</resources>

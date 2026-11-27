@@ -1,0 +1,202 @@
+# Builds the signed APK for a version tag and attaches it to a GitHub Release.
+#
+# Result: exactly two files with fixed names, lara-im-ohr.apk and lara-im-ohr.apk.sha256, so the
+# download address stays the same from version to version.
+#
+# The APK must carry the one project key (docs/release.md). app/build.gradle.kts falls back to a
+# debug key when no keystore is configured. Such an APK cannot replace the installed app, and
+# uninstalling first costs the assistant role, the permissions and the voice-button default.
+# So this job stops before the build when a signing secret is missing, and after the build it
+# compares the certificate in the APK with the one in the keystore.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    # Named explicitly: only then GitHub runs bash with "-o pipefail".
+    shell: bash
+
+jobs:
+  apk:
+    # Named image and named JDK: ubuntu-latest already means Ubuntu 26.04 with JDK 25.
+    # ubuntu-24.04 ships the Android SDK with platform 37.2, so there is no SDK set-up step.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write # create the release and upload its two files
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # versionCode = major * 10000 + minor * 100 + patch. MINOR and PATCH stop at 99 so that the
+      # code always grows with the version; Android refuses to install a lower code over a
+      # higher one.
+      - name: Version from tag
+        id: version
+        run: |
+          pattern='^v(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)(-[0-9A-Za-z.]+)?$'
+          if [[ ! "$GITHUB_REF_NAME" =~ $pattern ]]; then
+            echo "::error title=Tag is not a version::'$GITHUB_REF_NAME' must look like v1.2.3 or v1.2.3-rc1: three numbers without leading zeros, the second and third at most 99."
+            exit 1
+          fi
+          code=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))
+          if (( code == 0 )); then
+            echo "::error title=Tag is not a version::v0.0.0 would give versionCode 0, Android needs at least 1."
+            exit 1
+          fi
+          prerelease=false
+          if [[ -n "${BASH_REMATCH[4]}" ]]; then prerelease=true; fi
+          {
+            echo "name=${GITHUB_REF_NAME#v}"
+            echo "code=$code"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "versionName ${GITHUB_REF_NAME#v}, versionCode $code, prerelease $prerelease"
+
+      - name: Signing secrets present
+        env:
+          LARA_KEYSTORE_BASE64: ${{ secrets.LARA_KEYSTORE_BASE64 }}
+          LARA_STOREPASSWORD: ${{ secrets.LARA_STOREPASSWORD }}
+          LARA_KEYALIAS: ${{ secrets.LARA_KEYALIAS }}
+          LARA_KEYPASSWORD: ${{ secrets.LARA_KEYPASSWORD }}
+        run: |
+          missing=0
+          for name in LARA_KEYSTORE_BASE64 LARA_STOREPASSWORD LARA_KEYALIAS LARA_KEYPASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error title=Signing secret missing::Repository secret $name is not set. No release without the project key, see docs/release.md."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Assistant metadata complete
+        run: sh tools/check-assistant-metadata.sh
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # No cache: a signed release is not built from restored build output. This also keeps the
+      # proprietary cache provider of gradle/actions v6 out of the job.
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: true
+
+      # Opening the keystore here turns a wrong password or alias into one clear message
+      # instead of a signing error at the end of the build.
+      - name: Write keystore
+        id: keystore
+        env:
+          LARA_KEYSTORE_BASE64: ${{ secrets.LARA_KEYSTORE_BASE64 }}
+          LARA_STOREPASSWORD: ${{ secrets.LARA_STOREPASSWORD }}
+          LARA_KEYALIAS: ${{ secrets.LARA_KEYALIAS }}
+        run: |
+          dir="$RUNNER_TEMP/keystore"
+          install -m 700 -d "$dir"
+          if ! printf '%s' "$LARA_KEYSTORE_BASE64" | base64 --decode > "$dir/lara.keystore"; then
+            echo "::error title=Keystore secret unusable::LARA_KEYSTORE_BASE64 is not valid base64. Create it with: base64 -w0 <keystore file>"
+            exit 1
+          fi
+          chmod 600 "$dir/lara.keystore"
+          if ! output="$(keytool -exportcert -keystore "$dir/lara.keystore" -alias "$LARA_KEYALIAS" \
+              -storepass:env LARA_STOREPASSWORD -file "$dir/certificate.der" 2>&1)"; then
+            echo "::error title=Keystore secret unusable::The keystore from LARA_KEYSTORE_BASE64 does not open with LARA_STOREPASSWORD, or has no entry named LARA_KEYALIAS."
+            echo "$output"
+            exit 1
+          fi
+          certificate="$(sha256sum "$dir/certificate.der" | cut -d ' ' -f 1)"
+          echo "certificate=$certificate" >> "$GITHUB_OUTPUT"
+          echo "Signing certificate SHA-256: $certificate"
+
+      # The unit tests run again here because a tag can be pushed before ci.yml has finished.
+      - name: Build signed release APK
+        env:
+          LARA_STOREPASSWORD: ${{ secrets.LARA_STOREPASSWORD }}
+          LARA_KEYALIAS: ${{ secrets.LARA_KEYALIAS }}
+          LARA_KEYPASSWORD: ${{ secrets.LARA_KEYPASSWORD }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          export LARA_STOREFILE="$RUNNER_TEMP/keystore/lara.keystore"
+          ./gradlew :core:test :app:assembleRelease --console=plain \
+            -Plara.versionName="$VERSION_NAME" -Plara.versionCode="$VERSION_CODE"
+
+      - name: Remove keystore
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/keystore"
+
+      # Gradle ignores a -P property it does not know and signs with whatever configuration it
+      # ends up with, so a wrong version or key would not fail the build. Read both back from
+      # the APK itself.
+      - name: Check the APK, name the files
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          CERTIFICATE: ${{ steps.keystore.outputs.certificate }}
+        run: |
+          shopt -s nullglob
+          apks=(app/build/outputs/apk/release/*.apk)
+          if (( ${#apks[@]} != 1 )); then
+            echo "::error title=Unexpected build output::Expected exactly one APK in app/build/outputs/apk/release, found ${#apks[@]}: ${apks[*]}"
+            exit 1
+          fi
+          apk="${apks[0]}"
+
+          candidates=("$ANDROID_HOME"/build-tools/*/apksigner)
+          if (( ${#candidates[@]} == 0 )); then
+            echo "::error title=No build-tools::No apksigner under $ANDROID_HOME/build-tools."
+            exit 1
+          fi
+          tools="$(dirname "$(printf '%s\n' "${candidates[@]}" | sort -V | tail -n 1)")"
+
+          if ! verification="$("$tools/apksigner" verify --print-certs "$apk")"; then
+            echo "::error title=Signature does not verify::apksigner rejects $apk."
+            exit 1
+          fi
+          signers="$(awk '/certificate SHA-256 digest:/ { print $NF }' <<< "$verification")"
+          if [[ "$signers" != "$CERTIFICATE" ]]; then
+            echo "::error title=Wrong signing key::The APK is signed with certificate '${signers:-none}', the keystore from the secrets has '$CERTIFICATE'."
+            exit 1
+          fi
+
+          package="$("$tools/aapt2" dump badging "$apk" | awk 'NR == 1')"
+          if [[ "$package" != *" versionCode='$VERSION_CODE' versionName='$VERSION_NAME'"* ]]; then
+            echo "::error title=Wrong version in APK::Expected versionCode $VERSION_CODE and versionName $VERSION_NAME, the APK says: $package"
+            exit 1
+          fi
+
+          mkdir dist
+          cp "$apk" dist/lara-im-ohr.apk
+          ( cd dist && sha256sum lara-im-ohr.apk > lara-im-ohr.apk.sha256 && cat lara-im-ohr.apk.sha256 )
+
+      # The GitHub CLI of the runner image instead of a third-party action: it uploads both files
+      # to a draft and publishes afterwards, so a release never appears without its APK.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          CERTIFICATE: ${{ steps.keystore.outputs.certificate }}
+        run: |
+          notes="$(printf -- '- %s\n' \
+            'Install or update: `adb install -r lara-im-ohr.apk`' \
+            'Check the download: `sha256sum -c lara-im-ohr.apk.sha256`' \
+            "versionCode: \`$VERSION_CODE\`" \
+            "Signing certificate SHA-256: \`$CERTIFICATE\`")"
+          options=(--repo "$GITHUB_REPOSITORY" --verify-tag --title "Lara im Ohr $VERSION_NAME" --notes "$notes" --generate-notes)
+          if [[ "$PRERELEASE" == true ]]; then options+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" dist/lara-im-ohr.apk dist/lara-im-ohr.apk.sha256 "${options[@]}"

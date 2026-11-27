@@ -1,0 +1,65 @@
+# Checks every push and every pull request: assistant metadata, unit tests, lint, debug build.
+#
+# The debug APK built here is signed with a throw-away key of the runner, because this workflow
+# sees no secrets. It is deliberately not offered for download: it could not replace the
+# installed app, and uninstalling first costs the assistant role, the permissions and the
+# voice-button default. Installable APKs come from release.yml only.
+
+name: ci
+
+on:
+  push:
+    # Branches only. A version tag is release.yml's job, which runs the same checks itself.
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    # Named image and named JDK: ubuntu-latest already means Ubuntu 26.04 with JDK 25.
+    # ubuntu-24.04 ships the Android SDK with platform 37.2, so there is no SDK set-up step.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # First, because it needs no toolchain and a build without this metadata silently loses
+      # the assistant role on the phone.
+      - name: Assistant metadata complete
+        run: sh tools/check-assistant-metadata.sh
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # "basic" is the open-source cache. The default provider of gradle/actions v6 is a
+      # proprietary component whose terms of use are accepted by using it.
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+
+      - name: Unit tests, lint, debug build
+        run: ./gradlew :core:test :app:lintDebug :app:assembleDebug --console=plain
+
+      # Lint does not stop the build (abortOnError = false in app/build.gradle.kts), so the
+      # report is the only place where its findings show up.
+      - name: Keep the lint report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.*
+          if-no-files-found: ignore
