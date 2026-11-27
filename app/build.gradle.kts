@@ -17,7 +17,15 @@ fun signingValue(name: String): String? =
     keystoreProps.getProperty(name) ?: System.getenv("LARA_" + name.uppercase())
 
 val laraVersionName = (findProperty("lara.versionName") as String?) ?: "0.1.0-dev"
-val laraVersionCode = ((findProperty("lara.versionCode") as String?) ?: "1").toInt()
+
+// versionCode = number of commits. Android refuses to install a lower code over a higher one;
+// counting commits makes every later build installable over every earlier one, whether it was
+// built here, in CI or for a release (.github/workflows/release.yml uses the same rule).
+val commitCount: Int? = runCatching {
+    providers.exec { commandLine("git", "rev-list", "--count", "HEAD") }
+        .standardOutput.asText.get().trim().toInt()
+}.getOrNull()
+val laraVersionCode = (findProperty("lara.versionCode") as String?)?.toInt() ?: commitCount ?: 1
 
 // 36 keeps Android 17's background-audio rules at the lenient level. Build with
 // -Plara.targetSdk=37 to test the strict level.

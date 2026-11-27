@@ -17,12 +17,14 @@ import android.os.IBinder
 import android.os.PowerManager
 import io.github.domicc.lara.LaraApp
 import io.github.domicc.lara.R
+import io.github.domicc.lara.speech.SessionPhrases
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -42,6 +44,10 @@ class SessionService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var linkWasUp = false
 
+    /** The wearer ended the running session with a second tap on the hearing aid. */
+    @Volatile
+    private var endedByTap = false
+
     /** Journals link changes and ends the session when the hearing aid closes the link. */
     private val linkReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -56,6 +62,7 @@ class SessionService : Service() {
                 ACTION_STOP_VOICE_COMMAND -> {
                     // a second tap on the hearing aid during a session
                     journal.log("tap_stop")
+                    endedByTap = true
                     session?.cancel()
                 }
             }
@@ -94,6 +101,7 @@ class SessionService : Service() {
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "lara:session")
             .apply { acquire(SESSION_WAKE_MS) }
         linkWasUp = false
+        endedByTap = false
         val program = SessionPrograms.create(intent?.getStringExtra(EXTRA_PROGRAM))
         session = scope.launch {
             val link = AudioLink(this@SessionService, app.journal, app.headset, trigger, device)
@@ -114,8 +122,14 @@ class SessionService : Service() {
             } catch (e: Exception) {
                 link.step("error", mapOf("exception" to e.toString()))
             } finally {
-                link.close(result)
+                link.close(result, app.prompts.get(SessionPhrases.END))
                 markOpen(this@SessionService, false)
+                // A second tap makes the hearing aid close the voice link itself, so nothing can
+                // be said over it any more. Say it over the media channel instead.
+                if (result == "cancelled" && endedByTap) {
+                    delay(AFTER_TAP_MS)
+                    app.announcer.announce(SessionPhrases.END, "session_end")
+                }
                 wakeLock?.let { if (it.isHeld) it.release() }
                 wakeLock = null
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -165,6 +179,7 @@ class SessionService : Service() {
         private const val PREFERENCES = "session"
         private const val KEY_OPEN = "open"
         private const val HANDOVER_WAKE_MS = 10_000L
+        private const val AFTER_TAP_MS = 500L
         private const val ACTION_STOP_VOICE_COMMAND = "android.intent.action.STOP_VOICE_COMMAND"
         private const val BluetoothProfile_EXTRA_STATE = "android.bluetooth.profile.extra.STATE"
 

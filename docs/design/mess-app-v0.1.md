@@ -14,7 +14,13 @@ Die erste Ausbaustufe läuft auf dem Telefon. Dieser Abschnitt hält fest, was d
 - Die Sprachverbindung steht nach 0,6 bis 0,8 s. Die Aufnahme kommt vom Hörgeräte-Mikrofon und ist nicht stummgeschaltet. Die Wiedergabe landet im Hörgerät.
 - Eine Ansage ohne Auslöser über den Musik-Kanal funktioniert (bisher bei eingeschaltetem Display geprüft).
 
-**Noch nicht belegt:** dasselbe nach Stunden Ruhe und in der Hosentasche; die Stundenansage aus dem Tiefschlaf; alles rund um den Shelly.
+- Die Stundenansage kam aus dem Tiefschlaf (Doze), der Wecker 48 ms nach der vollen Stunde.
+- In einer per Tap geöffneten Sitzung kommen Shelly-Drücke bei gesperrtem, dunklem Telefon im Tiefschlaf an und werden angesagt: 21 Ereignisse empfangen, eines verloren.
+- Der Shelly sendet pro Druck etwa eine Sekunde lang (gemessen 950 bis 1020 ms), bei „gehalten" 1,5 bis 2,3 s.
+
+Zahlen und Bedingungen stehen unter `docs/measurements/2026-11-27.md`.
+
+**Noch nicht belegt:** alles nach Stunden Ruhe und in der Hosentasche; der Empfang des Shelly ohne offene Sitzung; die Wirkung der Scan-Drossel.
 
 **Was sich gegenüber diesem Dokument geändert hat**
 
@@ -22,6 +28,8 @@ Die erste Ausbaustufe läuft auf dem Telefon. Dieser Abschnitt hält fest, was d
 - *Hörgerät festlegen (neu):* Der Besitzer wählt einmal aus, welches Bluetooth-Gerät das Hörgerät ist. Töne, Ansagen und Sitzungen gehen ausschließlich an dieses Gerät, nie an Auto, anderes Headset oder Telefonlautsprecher. Die Sprachtaste anderer Geräte reicht die App an den bisherigen Assistenten weiter. Fehler vor dem Aufbau der Verbindung werden per Vibration gemeldet, nicht per Ton.
 - *Ansagen ohne Auslöser (neu):* Über den Musik-Kanal, ausgelöst per Wecker. Als Test gibt es eine abschaltbare Ansage der Uhrzeit zu jeder vollen Stunde. Sie liefert nebenbei stündlich einen Messpunkt nach langer Ruhe.
 - *Absicherung der Sitzung (neu):* Obergrenze von fünf Minuten je Sitzung, Abbruch bei Verlust des Audio-Fokus (Anruf, Wecker), Aufräumen einer offen gebliebenen Verbindung nach einem Absturz.
+- *Ansagen statt Töne (Wunsch des Auftraggebers):* Shelly-Drücke werden gesprochen („Taste 1 kurz"), jedes normale Sitzungsende mit „Beende". Die Sätze werden einmal mit der Sprachausgabe des Telefons erzeugt und als Audio abgelegt.
+- *Signaturschlüssel:* liegt als Secret bei GitHub Actions. Die Pipeline baut signiert, für Versions-Tags als Release und auf Knopfdruck für jeden Branch. Der Versionscode ist die Zahl der Commits.
 - *Shelly-Messung (6.4 B, 7):* Verpasste Drücke werden über die fortlaufende Paketnummer des Shelly gezählt, nicht durch Mitzählen. Der Scan wird nur während einer offenen Sitzung hochgefahren. Für lange Reihen gibt es einen stillen Modus, der nur mitschreibt.
 - *Scan-Drossel (3):* Am Telefon ist sie als Einstellung gesetzt. Ob und wie stark sie wirkt, ist noch nicht gemessen.
 
@@ -346,7 +354,8 @@ Auf Englisch, damit andere Hörgeräteträger etwas davon haben. Inhalt:
 **Freigaben**
 
 - Commit und Push ins öffentliche Repo: am 27.11.2026 freigegeben.
-- Noch offen: Signaturschlüssel als Secret im GitHub-Repo ablegen und das erste Release bauen lassen.
+- Signaturschlüssel als Secret bei GitHub Actions: am 27.11.2026 freigegeben und eingerichtet.
+- Noch offen: Zeitpunkt des ersten Releases.
 
 ## 13. Der Umsetzung überlassen
 
@@ -366,4 +375,4 @@ Beides bekommt ein eigenes Design, sobald die Messungen ausgewertet sind.
 
 ## Quellen
 
-Die ausführlichen Recherche- und Prüfberichte (20 Dateien) liegen lokal unter `.local/research/`, die Mitschnitte vom Gerät unter `.local/recon/`. Beide Ordner sind nicht Teil des Repos.
+Die ausführlichen Recherche- und Prüfberichte liegen unter `docs/research/`. Die Mitschnitte vom Gerät enthalten Geräteadressen und bleiben lokal unter `.local/recon/`, außerhalb des Repos.

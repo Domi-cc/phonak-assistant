@@ -1,7 +1,11 @@
-# Builds the signed APK for a version tag and attaches it to a GitHub Release.
+# Builds the signed APK.
 #
-# Result: exactly two files with fixed names, lara-im-ohr.apk and lara-im-ohr.apk.sha256, so the
-# download address stays the same from version to version.
+# - For a version tag (v1.2.3): attaches it to a GitHub Release. Result: exactly two files with
+#   fixed names, lara-im-ohr.apk and lara-im-ohr.apk.sha256, so the download address stays the
+#   same from version to version.
+# - Started by hand for any branch ("Run workflow", or `gh workflow run release.yml --ref <branch>`):
+#   the same signed APK as a build artifact, without a release. This is how an installable build
+#   is made on a machine that does not have the signing key.
 #
 # The APK must carry the one project key (docs/release.md). app/build.gradle.kts falls back to a
 # debug key when no keystore is configured. Such an APK cannot replace the installed app, and
@@ -14,6 +18,7 @@ name: release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -39,21 +44,32 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # the whole history: the versionCode is the number of commits
+          fetch-depth: 0
 
-      # versionCode = major * 10000 + minor * 100 + patch. MINOR and PATCH stop at 99 so that the
-      # code always grows with the version; Android refuses to install a lower code over a
-      # higher one.
-      - name: Version from tag
+      # versionCode = number of commits up to this one. Android refuses to install a lower code
+      # over a higher one; counting commits makes every later build installable over every
+      # earlier one, whether it was built here, on a developer machine or for a release
+      # (app/build.gradle.kts uses the same rule for local builds).
+      - name: Version
         id: version
         run: |
+          code="$(git rev-list --count HEAD)"
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then
+            branch="${GITHUB_REF_NAME//[^0-9A-Za-z]/-}"
+            name="0.0.0-$branch.${GITHUB_SHA::7}"
+            {
+              echo "name=$name"
+              echo "code=$code"
+              echo "prerelease=false"
+              echo "release=false"
+            } >> "$GITHUB_OUTPUT"
+            echo "branch build: versionName $name, versionCode $code"
+            exit 0
+          fi
           pattern='^v(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)(-[0-9A-Za-z.]+)?$'
           if [[ ! "$GITHUB_REF_NAME" =~ $pattern ]]; then
             echo "::error title=Tag is not a version::'$GITHUB_REF_NAME' must look like v1.2.3 or v1.2.3-rc1: three numbers without leading zeros, the second and third at most 99."
-            exit 1
-          fi
-          code=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))
-          if (( code == 0 )); then
-            echo "::error title=Tag is not a version::v0.0.0 would give versionCode 0, Android needs at least 1."
             exit 1
           fi
           prerelease=false
@@ -62,6 +78,7 @@ jobs:
             echo "name=${GITHUB_REF_NAME#v}"
             echo "code=$code"
             echo "prerelease=$prerelease"
+            echo "release=true"
           } >> "$GITHUB_OUTPUT"
           echo "versionName ${GITHUB_REF_NAME#v}, versionCode $code, prerelease $prerelease"
 
@@ -184,7 +201,19 @@ jobs:
 
       # The GitHub CLI of the runner image instead of a third-party action: it uploads both files
       # to a draft and publishes afterwards, so a release never appears without its APK.
+      # A build started by hand: the signed APK as an artifact of this run, no release.
+      - name: Keep the APK
+        if: steps.version.outputs.release != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: lara-im-ohr-${{ steps.version.outputs.name }}
+          path: |
+            dist/lara-im-ohr.apk
+            dist/lara-im-ohr.apk.sha256
+          if-no-files-found: error
+
       - name: Publish release
+        if: steps.version.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION_NAME: ${{ steps.version.outputs.name }}

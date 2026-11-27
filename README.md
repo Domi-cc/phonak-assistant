@@ -47,13 +47,13 @@ This repository is the app that answers them, and the notes on everything we lea
 | ✅ | A sideloaded app can be chosen as Android's digital assistant and keeps the role across updates | 📏 measured |
 | ✅ | A **double tap on the hearing aid starts the app while the phone is locked and the display is off**; the display stays off | 📏 measured |
 | ✅ | The app opens the wideband voice link in about 0.6 to 0.8 s, records from the **hearing-aid microphone** and plays audio into the aid | 📏 measured |
-| ✅ | The app can speak **unprompted** over the media channel ("16 Uhr 25"), and only if the sound would reach the hearing aid and nothing else | 📏 measured (screen on) |
-| 🧪 | Hourly announcement fired by an alarm from deep sleep | built, being measured |
-| 🧪 | The same tap after hours of idle, and with the phone in a pocket | not measured yet |
-| 🔨 | Pocket remote (Shelly BLU RC Button 4): reception, count session, spoken numbers | in progress |
+| ✅ | The app can speak **unprompted** over the media channel, and only if the sound would reach the hearing aid and nothing else. An hourly test alarm fired from deep sleep 48 ms late | 📏 measured |
+| ✅ | **Tap to wake, remote to navigate:** in a session opened by the tap, presses on the pocket remote are received with the phone dark and in Doze, and spoken into the aid ("Taste 1 kurz") | 📏 measured (21 presses, 1 lost) |
+| 🧪 | The same after hours of idle, and with the phone in a pocket | not measured yet |
+| 🔨 | The remote opening a session by itself (listening all day in the background) | built, not on the phone yet |
 | 🗓 | Spoken menu, Hermes connection, media keys | planned |
 
-<sub>All measurements: 27 November 2026, one device. See <a href="#tested-hardware">Tested hardware</a>.</sub>
+<sub>All measurements: 27 November 2026, one device, small samples. Numbers and conditions: <a href="docs/measurements/2026-11-27.md">docs/measurements</a>.</sub>
 
 ### The eleven seconds that mattered
 
@@ -183,7 +183,9 @@ you build something similar.
 
 > [!NOTE]
 > There is no release yet. Until the first tagged build appears under *Releases*, build the APK
-> yourself (see [Build from source](#build-from-source)).
+> yourself (see [Build from source](#build-from-source)). If you fork this, put your own
+> signing key into your repository's secrets and let GitHub build signed APKs for you:
+> [`docs/release.md`](docs/release.md).
 
 **You need:** an Android 16+ phone (minSdk 36), a hearing aid or headset with a hands-free
 "voice assistant" gesture, and `adb` for installing.
@@ -193,6 +195,7 @@ you build something similar.
    - *Berechtigungen*: allow microphone, nearby devices and notifications.
    - *Assistentenrolle*: choose the app as digital assistant.
    - *Hörgerät*: pick which connected device is your hearing aid.
+   - optional, *Shelly-Fernbedienung anlernen*: press a button on the remote and pick it.
 3. With the phone **unlocked**, do the assistant gesture on the hearing aid once. Android shows a
    chooser: pick **Lara im Ohr** and **Always**.
 4. Lock the phone, let the display go dark, and tap again.
@@ -208,6 +211,9 @@ installed. The checklist line *Hörgeräte-Sprachtaste* shows who currently gets
 | One higher tone | speak now |
 | One lower tone | recording finished |
 | *your own voice* | the echo test plays back what the hearing-aid microphone recorded |
+| "Taste 1 kurz" | a press on the remote arrived: button and gesture, spoken (a tone per button if the phrase is not ready yet) |
+| "einer fehlt" | the remote's packet counter shows that a press was lost before this one |
+| "Beende" | the session ends normally |
 | Two falling tones | the session closed normally |
 | Two low buzzes | something went wrong (in the hearing aid) |
 | A short double vibration | something went wrong before the link to the hearing aid was up |
@@ -242,12 +248,17 @@ compileSdk 37.2, minSdk 36, targetSdk 36 (switch with `-Plara.targetSdk=37`).
 
 | Path | What |
 |---|---|
-| `core/` | pure Kotlin, no Android imports: journal format (and soon BTHome parsing), tested on the JVM |
+| `core/` | pure Kotlin, no Android imports: journal format, BTHome parser, press tracking with loss counting; 93 JVM tests |
 | `app/…/trigger` | the invisible activity that receives the hearing-aid tap |
 | `app/…/assistant` | the three services that make the app a digital assistant |
 | `app/…/audio` | the voice link to the hearing aid, the session service, the echo test |
+| `app/…/shelly` | the remote: search, live test, reception during a session, spoken presses |
+| `app/…/speech` | spoken phrases, synthesised once and cached as audio for the voice link |
 | `app/…/announce` | unprompted announcements and the hourly test |
 | `docs/design/` | the design document for this version (German) |
+| `docs/measurements/` | what was measured on the device, with conditions |
+| `docs/research/` | the research and verification reports behind the design |
+| `CLAUDE.md` | hand-over notes for continuing the work in an AI coding session |
 
 <details>
 <summary><b>Debugging toolkit</b>: the commands worth knowing</summary>
@@ -385,12 +396,14 @@ The streaming projects in this group use ASHA or LE Audio. The hearing aid used 
 
 - [x] Assistant role, hearing-aid tap, voice link, echo test
 - [x] Unprompted announcements, hourly test
-- [ ] Pocket remote: BTHome parsing, background reception, count session, spoken numbers
+- [x] Pocket remote: BTHome parsing, search and live test, spoken presses inside a session
+- [ ] Pocket remote: listening in the background, so that a press can open a session
 - [ ] Measurements: after hours of idle, in the pocket, per scan mode
 - [ ] Media keys as an extra trigger
 - [ ] Spoken menu: weather, appointments, to-dos
 - [ ] Hermes connection, speech recognition, reminders pushed from the agent
-- [ ] Signed releases from CI
+- [x] Signed builds from CI (any branch on demand, releases for tags)
+- [ ] First release
 
 ## Licence
 

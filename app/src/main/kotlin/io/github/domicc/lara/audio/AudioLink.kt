@@ -251,17 +251,22 @@ class AudioLink(
 
     /**
      * Closes everything and journals `session_end`. Safe to call more than once and after a
-     * failed [open]. Plays the end tone for "ok" and the error tone for any other result
-     * except "cancelled" (then the hearing aid has closed the link already).
+     * failed [open]. For "ok" it plays [farewell] (a spoken "Beende", if given) and the end tone,
+     * for any other result the error tone, and nothing for "cancelled": then the hearing aid
+     * has closed the link already.
      */
     @SuppressLint("MissingPermission")
-    suspend fun close(result: String) = withContext(NonCancellable + Dispatchers.IO) {
+    suspend fun close(result: String, farewell: ShortArray? = null) = withContext(NonCancellable + Dispatchers.IO) {
         if (closed) return@withContext
         closed = true
         val toHearingAid = linkWasUp && audio.communicationDevice?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
         track?.let { track ->
             if (result != "cancelled" && toHearingAid) {
-                val tone = (if (result == "ok") Tones.sessionEnd else Tones.error) + Tones.silence(TAIL_MS)
+                val tone = when {
+                    result != "ok" -> Tones.error
+                    farewell != null -> farewell + Tones.silence(120) + Tones.sessionEnd
+                    else -> Tones.sessionEnd
+                } + Tones.silence(TAIL_MS)
                 runCatching { track.write(tone, 0, tone.size, AudioTrack.WRITE_BLOCKING) }
             }
             runCatching { track.stop() }

@@ -1,4 +1,25 @@
-# Releasing
+# Signed builds and releases
+
+There are two ways to get an APK that carries the project key, and neither needs the key on
+your own machine:
+
+- **A release**: push a version tag, get a GitHub Release with the APK.
+- **A build of any branch**: start the workflow by hand, get the APK as a build artifact.
+
+## A build of any branch, from any machine
+
+```sh
+gh workflow run release.yml --ref my-branch     # or "Run workflow" in the Actions tab
+gh run watch                                    # wait for it
+gh run download --name 'lara-im-ohr-*'          # fetch lara-im-ohr.apk and its checksum
+adb install -r lara-im-ohr.apk
+```
+
+The APK is signed with the same key as every other build of this project, so it installs over
+whatever is on the phone and the assistant role, the permissions and the voice-button default
+stay. This is the way to work from a second computer: push the branch, let GitHub build it.
+
+## Releasing
 
 A release is a git tag. Pushing a tag such as `v0.2.0` starts `.github/workflows/release.yml`. It builds the app, signs it with the project key and attaches exactly two files to a GitHub Release:
 
@@ -16,6 +37,9 @@ The key lives outside the repository under `.local/keystore/` (git-ignored). Git
 The release job refuses to build when a secret is missing. After the build it compares the certificate inside the APK with the one in the keystore.
 
 ## Once: store the key as repository secrets
+
+This was done on 27 November 2026; the four secrets below exist. The steps are kept for the day
+the key has to be stored again.
 
 | Secret | Content |
 |---|---|
@@ -65,10 +89,10 @@ Never move a published tag. If a release is bad, fix it and tag the next patch v
 
 ## Version rules
 
-- The tag is `vMAJOR.MINOR.PATCH`. `versionName` is the tag without the `v`.
-- `versionCode` is `MAJOR * 10000 + MINOR * 100 + PATCH`, so `v0.2.0` gives 200. MINOR and PATCH go up to 99; the job rejects anything else.
-- A suffix such as `v0.2.0-rc1` makes a pre-release with the same `versionCode` as `v0.2.0`. Pre-releases do not count as "latest".
-- Android does not install a lower `versionCode` over an installed release build (`adb install -d` only helps while the installed build is debuggable). Local builds default to `versionCode` 1, so after installing a release build them with at least its code: `./gradlew :app:assembleDebug -Plara.versionCode=200`.
+- The tag is `vMAJOR.MINOR.PATCH`. `versionName` is the tag without the `v`. MINOR and PATCH go up to 99; the job rejects anything else.
+- `versionCode` is the number of commits up to the built commit (`git rev-list --count HEAD`). Local builds, branch builds and releases all follow this rule, so a build of a later commit always installs over a build of an earlier one. Android refuses the other direction.
+- A suffix such as `v0.2.0-rc1` makes a pre-release. Pre-releases do not count as "latest".
+- A branch build started by hand gets the `versionName` `0.0.0-<branch>.<commit>`.
 
 ## When the job fails
 
