@@ -1,5 +1,7 @@
 package io.github.domicc.lara.audio
 
+import io.github.domicc.lara.core.journal.JournalNames
+
 /**
  * The echo test: a tone says "speak now", a few seconds are recorded from the hearing-aid
  * microphone and played back, so the wearer hears which microphone was used.
@@ -24,7 +26,7 @@ class EchoProgram : SessionProgram {
         link.play(recording.pcm)
         link.silence(200)
         link.step("echo_played")
-        return if (recording.valid) "ok" else "recording_not_from_hearing_aid"
+        return if (recording.valid) JournalNames.RESULT_OK else "recording_not_from_hearing_aid"
     }
 
     private companion object {

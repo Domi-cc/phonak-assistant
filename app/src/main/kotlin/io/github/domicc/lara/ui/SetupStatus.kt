@@ -9,9 +9,9 @@ import android.os.PowerManager
 import android.os.SystemClock
 import io.github.domicc.lara.LaraApp
 import io.github.domicc.lara.assistant.LaraVoiceInteractionService
+import io.github.domicc.lara.core.scan.ScanStatus
 import io.github.domicc.lara.journal.DeviceState
 import io.github.domicc.lara.shelly.ListenerService
-import io.github.domicc.lara.shelly.ScanStatus
 import io.github.domicc.lara.speech.PromptCache
 import io.github.domicc.lara.trigger.VoiceCommandActivity
 
@@ -123,7 +123,7 @@ object SetupStatus {
                 ScanStatus.NOT_ENROLLED -> "Shelly nicht angelernt"
                 ScanStatus.BLUETOOTH_OFF -> "Bluetooth ist aus"
                 ScanStatus.NO_SCAN_PERMISSION -> "Berechtigung fehlt"
-                ScanStatus.WAITING -> "Start folgt in wenigen Sekunden"
+                ScanStatus.WAITING -> "Start folgt in bis zu 30 Sekunden"
                 else -> "Start fehlgeschlagen, siehe Protokoll"
             }
             return SetupItem(LISTENER, "Lausch-Dienst", if (status.off == ScanStatus.NOT_ENROLLED) null else false, "läuft · kein Scan: $why")

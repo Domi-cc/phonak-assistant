@@ -15,6 +15,7 @@ import android.os.IBinder
 import android.os.Looper
 import io.github.domicc.lara.LaraApp
 import io.github.domicc.lara.R
+import io.github.domicc.lara.core.scan.ScanStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,12 +37,21 @@ import kotlinx.coroutines.launch
  * scan. The service does not lift the hourly scan allowance; only an app on the screen is
  * exempt from that.
  *
- * It is started from three places, because none of them covers every case: the assistant
- * service when the system binds it (after unlocking, after a crash, after an update), the boot
- * and update receiver, and the main activity (the only one that works before the app is the
- * assistant). Starting a foreground service from the background is a privilege, which the
- * bound assistant service or the battery exemption provides. Every start is journaled with its
- * reason as `listener_start`, every refusal as `listener_refused`.
+ * It is started from several places, because none of them covers every case. Each one names
+ * itself as the reason of the start:
+ * - `assistant_ready`: the assistant service, when the system binds it (after unlocking, after
+ *   a crash, after an update);
+ * - `boot` and `app_update`: the boot and update receiver;
+ * - `main_activity`: whenever the app comes onto the screen, the only start that works before
+ *   the app is the assistant, and the one that picks up a permission granted in Android's
+ *   settings;
+ * - `permissions_answered`: after the app's own permission dialog;
+ * - `rescue_scan`: the rescue scan delivered into a process without the service;
+ * - `alarm`: the periodic refresh, if the owner has switched it on.
+ * Android itself brings the service back as `sticky_restart`. Starting a foreground service
+ * from the background is a privilege, which the bound assistant service or the battery
+ * exemption provides. Every start is journaled with its reason as `listener_start`, every
+ * refusal as `listener_refused`.
  *
  * No wake lock is held. With a filter the Bluetooth controller is meant to do the matching
  * while the phone sleeps and to wake it for a match; the `delayMs` of every `shelly_packet`
@@ -134,7 +144,7 @@ class ListenerService : Service() {
         super.onDestroy()
     }
 
-    /** Applies a change of remote, settings or audio session to the running scans at once. */
+    /** Applies a change of remote, settings or count session to the running scans at once. */
     private fun followSettings() {
         val store = LaraApp.instance.shellyStore
         // drop(1): the value at the time of the start is what onStartCommand applies itself
@@ -183,14 +193,17 @@ class ListenerService : Service() {
         var status: ScanStatus = ScanStatus()
             private set
 
-        /** True while an audio session is open, as told through [setSessionOpen]. */
+        /**
+         * True while a count session is open, as told through [setSessionOpen]. An echo test
+         * on its own is no such session: it takes no presses, so the scan stays as it is.
+         */
         val sessionOpen: Boolean get() = session.value
 
         /**
-         * Tells the listener that an audio session with the hearing aid has opened or closed.
-         * The scan changes between its session mode and its idle mode accordingly, and every
-         * `shelly_packet` line says in which of the two it arrived. Safe from any thread, and
-         * also while the service does not run: the next start picks the value up.
+         * Tells the listener that a count session has opened or closed. The scan changes
+         * between its session mode and its idle mode accordingly, and every `shelly_packet`
+         * line says in which of the two it arrived. Safe from any thread, and also while the
+         * service does not run: the next start picks the value up.
          */
         fun setSessionOpen(open: Boolean) {
             session.value = open

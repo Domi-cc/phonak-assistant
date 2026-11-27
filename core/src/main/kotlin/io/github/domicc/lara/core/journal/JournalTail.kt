@@ -14,6 +14,29 @@ object JournalTail {
     private const val LINE_BREAK = '\n'.code.toByte()
 
     /**
+     * The last [max] lines of a journal file, given its end. This is what a starting process
+     * reads to show the newest events: a day of measurements makes a file of many megabytes,
+     * and reading all of it would delay the answer to the trigger that started the process.
+     *
+     * @param end the last bytes of the file
+     * @param fromStart false if [end] begins somewhere inside the file. Its first line is then
+     * most likely cut off and is left out.
+     * @return the lines without their line breaks, oldest first; empty lines are left out
+     */
+    fun lastLines(end: ByteArray, fromStart: Boolean, max: Int): List<String> {
+        var start = 0
+        if (!fromStart) {
+            val firstBreak = end.indexOf(LINE_BREAK)
+            if (firstBreak < 0) return emptyList()
+            start = firstBreak + 1
+        }
+        return String(end, start, end.size - start, Charsets.UTF_8)
+            .split('\n')
+            .filter { it.isNotEmpty() }
+            .takeLast(max)
+    }
+
+    /**
      * Hands every complete line of [stream] to [onLine], without its line break. A last line
      * without a line break is still being written and is left for the next call.
      *

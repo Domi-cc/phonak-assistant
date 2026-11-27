@@ -16,7 +16,11 @@ import io.github.domicc.lara.core.scan.ScanConfig
  *
  * The alarm exists because the app cannot ask Android whether a scan is still registered. A
  * restart of the Bluetooth stack that went unnoticed would leave the remote dead until the next
- * reboot, so the scans are registered anew every few minutes ([ScanConfig.refreshMinutes]).
+ * reboot, so the scans can be registered anew every so many minutes
+ * ([ScanConfig.refreshMinutes]). It is off unless the owner switches it on: registering anew
+ * replaces the running scan, which changes how Android accounts for it, and the alarm wakes a
+ * dozing phone, so it is part of what is being measured. Bluetooth switching off and on and a
+ * new process are noticed without it.
  * The alarm is inexact, armed once and re-armed when it fires, and of the kind that also fires
  * in Doze; it wakes the phone for a moment and holds no wake lock.
  */

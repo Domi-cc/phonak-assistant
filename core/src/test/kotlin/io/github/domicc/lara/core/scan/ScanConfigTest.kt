@@ -18,7 +18,14 @@ class ScanConfigTest {
     }
 
     @Test
-    fun `the mode follows the audio session`() {
+    fun `by default no scan is replaced on a timer`() {
+        // replacing a scan resets Android's accounting for it, which is what is being measured
+        assertEquals(0, ScanConfig().refreshMinutes)
+        assertEquals(24 * 60, ScanConfig.MAX_REFRESH_MINUTES)
+    }
+
+    @Test
+    fun `the mode follows the count session`() {
         val config = ScanConfig(idle = ScanMode.LOW_POWER, session = ScanMode.LOW_LATENCY)
         assertEquals(ScanMode.LOW_POWER, config.modeFor(sessionOpen = false))
         assertEquals(ScanMode.LOW_LATENCY, config.modeFor(sessionOpen = true))

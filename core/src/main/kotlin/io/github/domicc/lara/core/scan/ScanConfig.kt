@@ -25,17 +25,22 @@ enum class ScanMode(val word: String) {
 
 /**
  * The scan settings the owner can change, so that each of them can be measured against the
- * others. The defaults spend allowance only while an audio session is open, which is when a
+ * others. The defaults spend allowance only while a count session is open, which is when a
  * missed press is noticed at once.
  *
- * @param idle the mode outside an audio session
- * @param session the mode while an audio session is open
+ * @param idle the mode outside a count session
+ * @param session the mode while a count session is open
  * @param passive hand over every advertisement at once (true), or only together with the
  * answer to Android's scan request (false, Android's default). Users of this remote report
  * that most presses get lost the second way; the switch exists to measure exactly that.
  * @param rescue also register the second scan that delivers through a broadcast and so reaches
  * the app when its process is gone. Off by default: it draws on the same allowance.
- * @param refreshMinutes how often the scans are registered anew as a precaution; 0 for never
+ * @param refreshMinutes how often the scans are registered anew as a precaution; 0 for never.
+ * Off by default, because it is part of what is measured: registering anew means stopping the
+ * running scan, and in the Android 17.0 source a scan that is stopped before its accounting
+ * job has fired (after 24 minutes in the balanced mode) books no allowance at all. A refresh
+ * every few minutes would therefore keep a scan from ever being throttled, and the alarm
+ * behind it wakes a dozing phone. Results are only comparable at the same value.
  */
 data class ScanConfig(
     val idle: ScanMode = ScanMode.LOW_POWER,
@@ -47,6 +52,7 @@ data class ScanConfig(
     fun modeFor(sessionOpen: Boolean): ScanMode = if (sessionOpen) session else idle
 
     companion object {
-        const val DEFAULT_REFRESH_MINUTES = 15
+        const val DEFAULT_REFRESH_MINUTES = 0
+        const val MAX_REFRESH_MINUTES = 24 * 60
     }
 }

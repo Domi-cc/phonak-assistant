@@ -24,6 +24,9 @@ defaults:
   run:
     shell: bash
 
+# Actions are named by commit, with the release as a comment: a tag such as "v6" can be moved
+# to other code by whoever controls that repository. To update one, take the commit of the new
+# release tag (git ls-remote <repository> 'refs/tags/<tag>^{}') and change both workflows.
 jobs:
   check:
     # Named image and named JDK: ubuntu-latest already means Ubuntu 26.04 with JDK 25.
@@ -31,7 +34,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -40,25 +43,25 @@ jobs:
       - name: Assistant metadata complete
         run: sh tools/check-assistant-metadata.sh
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: '21'
 
       # "basic" is the open-source cache. The default provider of gradle/actions v6 is a
       # proprietary component whose terms of use are accepted by using it.
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
 
       - name: Unit tests, lint, debug build
         run: ./gradlew :core:test :app:lintDebug :app:assembleDebug --console=plain
 
-      # Lint does not stop the build (abortOnError = false in app/build.gradle.kts), so the
-      # report is the only place where its findings show up.
+      # A lint error fails the step above (abortOnError = true in app/build.gradle.kts).
+      # Warnings do not, so the report is the only place where they show up.
       - name: Keep the lint report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: lint-report
           path: app/build/reports/lint-results-debug.*

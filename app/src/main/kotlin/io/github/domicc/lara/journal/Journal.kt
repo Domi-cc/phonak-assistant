@@ -5,14 +5,17 @@ import android.os.SystemClock
 import android.util.Log
 import io.github.domicc.lara.core.journal.JournalCodec
 import io.github.domicc.lara.core.journal.JournalRecord
+import io.github.domicc.lara.core.journal.JournalTail
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.max
 
 /**
  * Persistent event journal: one JSON line per event, one file per day, in app-private storage.
@@ -56,13 +59,26 @@ class Journal(private val context: Context) {
     /** The file that takes the lines of the day [wallMs] lies in; it need not exist yet. */
     fun fileOf(wallMs: Long): File = File(dir, fileName(wallMs))
 
+    /**
+     * The newest records of the newest file. Only its end is read: this runs in every process
+     * start, also the one for a hearing-aid tap, and the file of a day of measurements has
+     * many megabytes. A journal that cannot be read must not stop the app, whatever the reason.
+     */
     private fun loadTail(): List<JournalRecord> = try {
-        files().lastOrNull()
-            ?.readLines()
-            ?.takeLast(KEEP_IN_MEMORY)
-            ?.mapNotNull(JournalCodec::decode)
-            ?: emptyList()
-    } catch (e: IOException) {
+        val file = files().lastOrNull()
+        if (file == null) {
+            emptyList()
+        } else {
+            RandomAccessFile(file, "r").use { reader ->
+                val start = max(0, reader.length() - TAIL_BYTES)
+                reader.seek(start)
+                val end = ByteArray((reader.length() - start).toInt())
+                reader.readFully(end)
+                JournalTail.lastLines(end, fromStart = start == 0L, max = KEEP_IN_MEMORY).mapNotNull(JournalCodec::decode)
+            }
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "journal not readable", e)
         emptyList()
     }
 
@@ -72,5 +88,8 @@ class Journal(private val context: Context) {
     private companion object {
         const val TAG = "LaraJournal"
         const val KEEP_IN_MEMORY = 300
+
+        /** Lines have a few hundred bytes each, so this holds [KEEP_IN_MEMORY] of them several times over. */
+        const val TAIL_BYTES = 512 * 1024L
     }
 }

@@ -13,10 +13,12 @@ class BthomeParserTest {
     private fun parse(hex: String): BthomePacket? = BthomeParser.parse(hex.hexToByteArray())
 
     @Test
-    fun `every vector of the verification report parses as expected`() {
-        // R1 to R10, S1 to S3b, Y1 to Y33
-        assertEquals(10 + 4 + 33, BthomeVectors.all.size)
+    fun `every vector parses as expected`() {
+        // R1 to R10, C1 to C5, S1 to S3, Y1 to Y32 without Y30 and Y31
+        assertEquals(10 + 5 + 3 + 30, BthomeVectors.all.size)
         assertEquals(BthomeVectors.all.size, BthomeVectors.all.map { it.id }.toSet().size)
+        // no vector stands in for another: each has bytes of its own
+        assertEquals(BthomeVectors.all.size, BthomeVectors.all.map { it.hex }.toSet().size)
         val failures = BthomeVectors.all.mapNotNull { vector ->
             val actual = BthomeParser.parse(vector.bytes)
             if (actual == vector.expected) null else "${vector.id} ${vector.hex}: expected ${vector.expected} but got $actual"
@@ -25,12 +27,12 @@ class BthomeParserTest {
     }
 
     @Test
-    fun `the real packet of the remote without Zigbee is a press of button 1`() {
-        val packet = assertNotNull(parse("44001d01643a013a003a003a00"))
+    fun `a packet received from the remote without Zigbee is a press of button 1`() {
+        val packet = assertNotNull(parse(BthomeVectors.byId("C1").hex))
         assertEquals(0x44, packet.deviceInfo)
         assertFalse(packet.encrypted)
         assertTrue(packet.triggerBased)
-        assertEquals(29, packet.packetId)
+        assertEquals(93, packet.packetId)
         assertEquals(100, packet.batteryPercent)
         assertEquals(listOf(ButtonEvent.PRESS, ButtonEvent.NONE, ButtonEvent.NONE, ButtonEvent.NONE), packet.buttons)
         assertFalse(packet.stoppedEarly)

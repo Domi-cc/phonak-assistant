@@ -1,6 +1,7 @@
 package io.github.domicc.lara.core.stats
 
 import io.github.domicc.lara.core.journal.JournalCodec
+import io.github.domicc.lara.core.journal.JournalNames
 import io.github.domicc.lara.core.journal.JournalRecord
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -57,6 +58,26 @@ class DayStatsCounterTest {
     }
 
     @Test
+    fun `lines without packet id and time are each an event of their own`() {
+        // written by a build that named these fields differently; they must not swallow each other
+        add("shelly_press", "packetId" to 93, "missedBefore" to 0)
+        add("shelly_press", "packetId" to 94, "missedBefore" to 1)
+        add("shelly_press", "packetId" to 95, "missedBefore" to 0)
+        add("shelly_press", "id" to 96, "missedBefore" to 0)
+        add("shelly_press", "id" to 96, "missedBefore" to 0)
+        assertEquals(DayStats(shellyEvents = 5, shellyMissed = 1), counter.stats())
+    }
+
+    @Test
+    fun `presses received while the scan of the screen ran are counted apart as well`() {
+        press(id = 10, tsMs = 1_000)
+        add("shelly_press", "button" to 1, "id" to 11, "missedBefore" to 0, "tsMs" to 5_000L, "fg" to true)
+        add("shelly_press", "button" to 1, "id" to 12, "missedBefore" to 0, "tsMs" to 9_000L, "fg" to false)
+        add("shelly_beacon", "id" to 13, "missedBefore" to 0, "tsMs" to 12_000L, "fg" to true)
+        assertEquals(DayStats(shellyEvents = 3, shellyWithControlScan = 1), counter.stats())
+    }
+
+    @Test
     fun `repeats, packets and simulated presses are not counted`() {
         add("shelly_repeat", "button" to 1, "id" to 10, "missedBefore" to 0, "tsMs" to 7_000L)
         add("shelly_packet", "id" to 10, "tsMs" to 7_000L, "new" to false)
@@ -90,6 +111,29 @@ class DayStatsCounterTest {
     fun `every type that counts is named for readers that skip lines`() {
         val counted = listOf("shelly_press", "shelly_beacon", "tap_intent", "session_end", "session_refused")
         assertEquals(counted.toSet(), DayStatsCounter.TYPES)
+        // journals written by earlier builds use these words; changing one breaks their counting
+        assertEquals(
+            counted,
+            listOf(
+                JournalNames.SHELLY_PRESS,
+                JournalNames.SHELLY_BEACON,
+                JournalNames.TAP,
+                JournalNames.SESSION_END,
+                JournalNames.SESSION_REFUSED,
+            ),
+        )
+        assertEquals(
+            listOf("id", "tsMs", "missedBefore", "fg", "result", "ok", "cancelled"),
+            listOf(
+                JournalNames.ID,
+                JournalNames.TS_MS,
+                JournalNames.MISSED_BEFORE,
+                JournalNames.CONTROL_SCAN,
+                JournalNames.RESULT,
+                JournalNames.RESULT_OK,
+                JournalNames.RESULT_CANCELLED,
+            ),
+        )
         for (type in counted) {
             val before = counter.stats()
             add(type, "id" to type.hashCode(), "tsMs" to 1L, "missedBefore" to 1)

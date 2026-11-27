@@ -27,6 +27,8 @@ defaults:
     # Named explicitly: only then GitHub runs bash with "-o pipefail".
     shell: bash
 
+# Actions are named by commit, with the release as a comment, see ci.yml. It matters most here:
+# the set-up actions run in the job that holds the signing key.
 jobs:
   apk:
     # Named image and named JDK: ubuntu-latest already means Ubuntu 26.04 with JDK 25.
@@ -36,7 +38,7 @@ jobs:
     permissions:
       contents: write # create the release and upload its two files
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -84,14 +86,14 @@ jobs:
       - name: Assistant metadata complete
         run: sh tools/check-assistant-metadata.sh
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: '21'
 
       # No cache: a signed release is not built from restored build output. This also keeps the
       # proprietary cache provider of gradle/actions v6 out of the job.
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-disabled: true
 

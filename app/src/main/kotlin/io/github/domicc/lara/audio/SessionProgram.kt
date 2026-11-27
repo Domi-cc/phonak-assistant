@@ -21,7 +21,7 @@ object SessionPrograms {
 
     fun create(name: String?): SessionProgram = when (name) {
         COUNT -> LaraApp.instance.let { CountProgram(it, it.router, it.announcer) }
-        ECHO -> EchoProgram()
+        // also for a name this build does not know
         else -> EchoProgram()
     }
 }

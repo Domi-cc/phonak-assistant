@@ -8,6 +8,7 @@ import android.os.Process
 import io.github.domicc.lara.audio.HeadsetLink
 import io.github.domicc.lara.core.input.Input
 import io.github.domicc.lara.input.InputRouter
+import io.github.domicc.lara.input.TapStore
 import io.github.domicc.lara.journal.DayCounters
 import io.github.domicc.lara.journal.Journal
 import io.github.domicc.lara.shelly.ShellyIntake
@@ -29,6 +30,10 @@ class LaraApp : Application() {
 
     /** Which remote is enrolled and how the app scans for it. */
     lateinit var shellyStore: ShellyStore
+        private set
+
+    /** What a hearing-aid tap starts. */
+    lateinit var tapStore: TapStore
         private set
 
     /** Where every advertisement of the enrolled remote ends up, whichever scan delivered it. */
@@ -61,16 +66,19 @@ class LaraApp : Application() {
     val inputs: SharedFlow<Input> = inputBus.asSharedFlow()
 
     /**
-     * Puts [input] on the bus. Never blocks; an input that no consumer has room for is
-     * journaled as `input_dropped`.
+     * Puts [input] on the bus. Never blocks; an input that nobody listens for or that no
+     * consumer has room for is journaled as `input_dropped`.
      *
      * @return how many consumers are listening right now; with 0 the input is lost
      */
     fun publish(input: Input): Int {
         val consumers = inputBus.subscriptionCount.value
-        if (!inputBus.tryEmit(input)) {
-            journal.log("input_dropped", InputRouter.fields(input) + ("reason" to "bus_full"))
+        val lost = when {
+            consumers == 0 -> "no_consumer"
+            !inputBus.tryEmit(input) -> "bus_full"
+            else -> null
         }
+        if (lost != null) journal.log("input_dropped", InputRouter.fields(input) + ("reason" to lost))
         return consumers
     }
 
@@ -80,7 +88,8 @@ class LaraApp : Application() {
         journal = Journal(this)
         headset = HeadsetLink(this, journal)
         shellyStore = ShellyStore(this, journal)
-        shelly = ShellyIntake(this, journal, shellyStore, ::publish)
+        tapStore = TapStore(this, journal)
+        shelly = ShellyIntake(this, journal, shellyStore) { publish(it) }
         prompts = PromptCache(this, journal)
         announcer = Announcer(prompts)
         counters = DayCounters(journal)
@@ -95,6 +104,8 @@ class LaraApp : Application() {
                 "build" to Build.ID,
                 "sdkFull" to Build.VERSION.SDK_INT_FULL,
                 "btModule" to bluetoothModule(),
+                // what the loss count of the first event of the remote is measured against
+                "shellyLastId" to shellyStore.lastPacketId,
                 "previousExit" to previousExit(),
             ),
         )

@@ -6,6 +6,7 @@ import android.os.Bundle
 import io.github.domicc.lara.LaraApp
 import io.github.domicc.lara.audio.SessionService
 import io.github.domicc.lara.core.input.InputSource
+import io.github.domicc.lara.core.journal.JournalNames
 
 /**
  * Input path A. Started by Android's Bluetooth stack when the hearing aid (or any hands-free
@@ -22,7 +23,7 @@ class VoiceCommandActivity : Activity() {
         SessionService.holdAwake(this)
         val device = intent?.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
         LaraApp.instance.journal.log(
-            "tap_intent",
+            JournalNames.TAP,
             mapOf(
                 "action" to intent?.action,
                 "hasDevice" to (device != null),
@@ -32,7 +33,8 @@ class VoiceCommandActivity : Activity() {
                 "origin" to InputSource.HEARING_AID_TAP.word,
             ),
         )
-        // The router decides what a tap does: it opens a count session, or ends a running one.
+        // The router decides what a tap does: it starts what the owner chose for it (the echo
+        // test unless set otherwise), or ends a running count session.
         LaraApp.instance.router.tap(device)
         finish()
     }

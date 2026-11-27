@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import io.github.domicc.lara.LaraApp
+import io.github.domicc.lara.core.input.TapProgram
 import io.github.domicc.lara.core.scan.ScanMode
 import io.github.domicc.lara.speech.PromptCache
 
@@ -35,8 +36,16 @@ fun SettingsSection() {
     val store = app.shellyStore
     val scan by store.scan.collectAsState()
     val wakes by store.wakes.collectAsState()
+    val tap by app.tapStore.program.collectAsState()
     val prompts by app.prompts.status.collectAsState()
 
+    ChoiceRow(
+        "Hörgeräte-Tap startet",
+        "Echo-Test prüft Mikrofon und Ausgabe · Zählsitzung = Aufwecken per Tap, Zählen per Shelly",
+        listOf(TapProgram.ECHO to "Echo-Test", TapProgram.COUNT to "Zählsitzung"),
+        tap,
+        app.tapStore::setProgram,
+    )
     ModeRow("Scan ohne Sitzung", "unbegrenzt nur im Sparmodus", scan.idle) { store.setScan(scan.copy(idle = it)) }
     ModeRow("Scan in der Sitzung", "mittel und schnell verbrauchen das Stunden-Kontingent", scan.session) {
         store.setScan(scan.copy(session = it))
@@ -65,13 +74,18 @@ fun SettingsSection() {
 }
 
 @Composable
-private fun ModeRow(label: String, detail: String, selected: ScanMode, onSelect: (ScanMode) -> Unit) {
+private fun ModeRow(label: String, detail: String, selected: ScanMode, onSelect: (ScanMode) -> Unit) =
+    ChoiceRow(label, detail, ScanMode.entries.map { it to modeLabel(it) }, selected, onSelect)
+
+/** A setting with a few values to choose from, each with the word the screen uses for it. */
+@Composable
+private fun <T> ChoiceRow(label: String, detail: String, options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
         Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ScanMode.entries.forEach { mode ->
-                FilterChip(selected = mode == selected, onClick = { onSelect(mode) }, label = { Text(modeLabel(mode)) })
+            options.forEach { (value, word) ->
+                FilterChip(selected = value == selected, onClick = { onSelect(value) }, label = { Text(word) })
             }
         }
     }

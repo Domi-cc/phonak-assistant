@@ -145,7 +145,7 @@ Alle Bausteine laufen unter derselben App-Kennung. Das ist Voraussetzung dafür,
 
 1. Android startet die Trampolin-Activity.
 2. Die App antwortet innerhalb von 5 s mit `BluetoothHeadset.startVoiceRecognition` für das gespeicherte Hörgerät. Die Verbindung zum Freisprech-Profil hält sie dafür vorab bereit.
-3. In Version 0.1 löst der Tap den Echo-Test aus (Abschnitt 7).
+3. In Version 0.1 löst der Tap den Echo-Test aus (Abschnitt 7). Umgesetzt als Standard einer Einstellung, die sich auf die Zählsitzung umstellen lässt (Abschnitt 15).
 4. Ein zweiter Tap in laufender Sitzung kommt als „Stopp" an und beendet sie.
 
 Das Hörgerät wird über die gespeicherte Adresse bestimmt, nicht über den Namen, damit nie die Freisprechanlage im Auto oder ein Kopfhörer gewählt wird.
@@ -166,7 +166,7 @@ Das Hörgerät wird über die gespeicherte Adresse bestimmt, nicht über den Nam
 | `spar` | Sparmodus | etwa jeder siebte Druck, dafür unbegrenzt |
 | `nur-rettung` | kein Rückruf-Scan | zeigt, was ohne Dienst übrig bleibt |
 
-7. Tastenbelegung in Version 0.1: Tasten 1, 2 und 4 zählen. Taste 3 startet den Echo-Test. Welche Geste gesendet wurde, wird immer protokolliert.
+7. Tastenbelegung in Version 0.1: Tasten 1, 2 und 4 zählen. Taste 3 startet den Echo-Test. Welche Geste gesendet wurde, wird immer protokolliert. Wie eine gehaltene Taste und ein unbekannter Gesten-Code behandelt werden, steht in Abschnitt 15.
 
 **C – Medientasten**
 
@@ -341,6 +341,37 @@ Auf Englisch, damit andere Hörgeräteträger etwas davon haben. Inhalt:
 2. **Hermes:** Anbindung über die HTTP-Schnittstelle des Hermes-Servers, Spracherkennung, Rückkanal für Erinnerungen.
 
 Beides bekommt ein eigenes Design, sobald die Messungen ausgewertet sind.
+
+## 15. Stand der Umsetzung (27.11.2026)
+
+Dieser Abschnitt hält fest, wo der Code vom Entwurf abweicht oder ihn ergänzt. Er beschreibt den Quellcode, nicht das Gerät: Am Pixel gelaufen sind bisher nur Rolle, Tap und Echo-Test, mit früheren Builds vom selben Tag. Shelly-Weg, Zählsitzung, Ansagen und ADB-Steuerung sind gebaut und nicht gemessen.
+
+**Ergänzungen, die der Entwurf nicht vorsah**
+
+- **Tap (6.4 A.3):** Der Tap startet standardmäßig den Echo-Test, wie entworfen. Die Einstellung „Hörgeräte-Tap startet" stellt ihn auf die Zählsitzung um (auch per ADB: `lara.SET --es tap count`). Grund: Messung 1 prüft „Aufwecken per Tap, Navigieren per Shelly", und der Tap ist der einzige Auslöser, der bei gesperrtem, dunklem Telefon nachweislich ankommt.
+- **Gehaltene Taste (6.4 B.7):** Dieser Shelly sendet beim Halten „hold" und beim Loslassen unter der nächsten Paketnummer „long" oder „press" (Protokoll vom Gerät, 27.11.2026). Gezählt wird nur das zweite Ereignis, sonst bekäme ein Druck zwei Zahlen und Taste 3 zwei Echo-Tests. „hold" weckt weiterhin auf.
+- **Gezählt wird pro Ereignis des Shelly**, nicht pro Fingerbewegung: Ein Doppeldruck, den der Shelly zu einer Geste zusammenfasst, bekommt eine Zahl. Beim Mitzählen etwa eine Sekunde zwischen den Drücken lassen.
+- **Unbekannter Gesten-Code:** wird protokolliert und löst nichts aus, weder Sitzung noch Zahl noch Echo-Test. Ein beschädigtes oder fremdes Paket darf keine Aufnahme starten.
+- **Verluste:** Gezählt werden Lücken in den Paketnummern des Shelly. Die zuletzt empfangene Paketnummer wird gespeichert, damit auch ein Verlust über einen Neustart der App hinweg gezählt wird. Angesagt („einer fehlt") werden nur Lücken innerhalb einer Sitzung; die Lücke vor dem ersten Druck einer Sitzung steht nur im Protokoll.
+- **„Shelly weckt auf":** Schalter, ob ein Druck außerhalb einer Sitzung eine Zählsitzung öffnet. Aus ist der stille Modus für Ruhe-Messungen. Der Standard ist „an"; ob das so bleibt, ist nicht entschieden.
+- **ADB-Steuerung (6.8) und Teilen des Protokolls** sind aus Stufe 4 vorgezogen. Den ADB-Empfänger erreicht, wer das Recht `DUMP` hält: die ADB-Shell und jede App, der der Besitzer dieses Recht selbst per ADB erteilt hat.
+
+**Abweichungen und Lücken**
+
+| Entwurf | Code |
+|---|---|
+| 6.4 B.6: ein Scan-Profil mit vier Stufen, darunter `nur-rettung` | Zwei Einstellungen, „Scan ohne Sitzung" und „Scan in der Sitzung", je `schnell`, `mittel` oder `spar`. `nur-rettung` fehlt: Der Rückruf-Scan lässt sich nicht abschalten. |
+| 6.4 B.2: Rückruf-Scan und Rettungs-Scan lauschen beide | Der Rettungs-Scan ist gebaut, aber standardmäßig aus, weil er am selben Stunden-Kontingent zehrt. Nicht entschieden. |
+| 6.3: Scans werden auch per Wecker neu angemeldet | Gebaut, standardmäßig aus und nur per ADB einstellbar (`refresh`). Neu anmelden heißt, den laufenden Scan zu ersetzen. Nach dem Quellcode von Android 17.0 bucht ein Scan seinen Verbrauch erst nach Ablauf einer Frist (24 min im mittleren Modus), und ein vorher gestoppter Scan bucht nichts. Ein Wecker alle 15 min hätte die Drossel damit ausgehebelt und die Messung verfälscht; außerdem weckt er das schlafende Telefon. |
+| 6.5: zwei Audio-Methoden, `sprachtaste` und `anruf`, wählbar | Nur `sprachtaste`. Lehnt das Hörgerät sie ab, öffnet die App den Weg über `setCommunicationDevice`; wählbar ist das nicht. |
+| 6.5: Fehler ohne stehende Verbindung per Vibration | Nicht gebaut. Solche Fehler stehen nur im Protokoll. |
+| 6.4 A: Hörgerät über die gespeicherte Adresse | Genommen wird das Gerät, das der Tap nennt, sonst das erste verbundene Freisprech-Gerät. |
+| 6.6: Protokoll in der Größe begrenzt | Täglich eine Datei, keine Größengrenze, alte Dateien bleiben liegen. Beim Start liest die App nur das Ende der neuesten Datei. |
+| 6.6: Export über Teilen-Dialog, Ablage als Datei und `adb shell dumpsys` | Nur der Teilen-Dialog. |
+| 6.7: Zähler „heute" und „gesamt", Echo-Tests bestanden x/y | Nur „heute": Shelly-Ereignisse und Lücken, Taps, Sitzungen nach Ergebnis. |
+| 6.7: Prüfung bei jedem Prozessstart, Verlust von Rolle, Bindung oder Sprachtasten-Standard als Mitteilung | Die Prüfliste läuft nur bei sichtbarer App. Ohne Oberfläche wird nur das Lösen der Bindung protokolliert (`assistant_unbound`); eine Mitteilung gibt es nicht. |
+| 6.4 C, Messung 4: Medientasten | Nicht gebaut (Stufe 4). |
+| 10: Tests in `:app` | Keine. Die Zustandslogik (wartende Drücke des Routers, Zählen und Ansage, ADB-Parameter, Scan-Zustand, Tageszähler) liegt in `:core` und wird dort getestet. |
 
 ## Quellen
 

@@ -12,9 +12,9 @@ As of 2026-11-27, on the one phone and the one hearing aid listed below.
 
 | Part | State |
 |---|---|
-| A sideloaded build can be selected as the phone's digital assistant, and Android keeps its assistant service bound | Verified on the device |
-| A double tap on the hearing aid starts the app while the phone is locked and the display is off; the display stays off | Verified on the device |
-| The app opens the wideband voice link, records from the hearing-aid microphone and plays audio into the hearing aid | Verified on the device |
+| A sideloaded build can be selected as the phone's digital assistant, and Android keeps its assistant service bound | Verified on the device, with an earlier build |
+| A double tap on the hearing aid starts the app while the phone is locked and the display is off; the display stays off | Verified on the device, with an earlier build |
+| The app opens the wideband voice link, records from the hearing-aid microphone and plays audio into the hearing aid (the echo test, started by the tap) | Verified on the device, with an earlier build |
 | Reception of the Shelly remote (BTHome v2 advertisements, background scan) | Built, not yet measured |
 | Count session: every received button press is counted aloud into the hearing aid | Built, not yet measured |
 | Spoken numbers, prepared ahead of time with the phone's speech engine, with tones as fallback | Built, not yet tried on the device |
@@ -24,6 +24,8 @@ As of 2026-11-27, on the one phone and the one hearing aid listed below.
 | Connection to Hermes | Planned |
 
 "Verified" means that it worked on this device on that day. It says nothing yet about behaviour after hours of standby, after a reboot or over many repetitions. Those measurements are what this app is for.
+
+"With an earlier build" means: the three verified rows were observed with builds made earlier on that day, in which the tap activity started the echo test directly. Since then the tap goes through the same router as every other input before it starts the echo test, and the Shelly path, the count session and the adb control were added. The source in its present state has not run on the phone.
 
 ## Tested hardware
 
@@ -126,7 +128,7 @@ The app therefore plays only from inside its microphone foreground service. It t
 - It never turns the screen on.
 - The voice link is open only during a session and is closed on every exit path. A link left open makes Android reject the next tap.
 - It never records without a deliberate trigger. A recording counts only if Android reports the hearing aid as the microphone actually used. There is no fallback to the phone's microphone.
-- It holds no permanent wake lock, only short ones for the hand-over from a trigger and for a running session.
+- It holds no permanent wake lock, only short timed ones: for the hand-over from a trigger, for a running session, and for a scan start that has to wait.
 - Every failure is written to the journal.
 
 The design document (in German) is [docs/superpowers/specs/2026-11-27-mess-app-design.md](docs/superpowers/specs/2026-11-27-mess-app-design.md).
@@ -138,7 +140,7 @@ You need a phone with Android 16 or newer (the app's `minSdk` is 36; only Androi
 The app's own texts are German. The names in quotation marks below are what you see on its screen.
 
 1. **Get the APK.** Download `lara-im-ohr.apk` from the [Releases](../../releases) page, or build it (see "Building from source"). If the Releases page is still empty, building is the only way. A release also carries `lara-im-ohr.apk.sha256`; check the download with `sha256sum -c lara-im-ohr.apk.sha256`. Install the APK by opening the file on the phone, or with `adb install -r lara-im-ohr.apk`.
-2. **Open the app.** The upper part of the screen consists of sections that open and close with a tap on their title. The first one is a checklist ("Einrichtung"). Each line shows a tick or a cross. Where Android offers a direct way to fix a line, there is a "Beheben" (fix) button.
+2. **Open the app.** The upper part of the screen consists of sections that open and close with a tap on their title. The first one is a checklist ("Einrichtung"). Each line shows a tick, a cross, or a dash where the state is neither good nor bad (for example while the spoken prompts are still being made). Where Android offers a direct way to fix a line, there is a "Beheben" (fix) button.
 3. **Grant the permissions** ("Berechtigungen"): microphone, nearby devices (Bluetooth) and notifications. Android shows a notification while a session runs, which is why the last one is needed.
 4. **Select the app as digital assistant** ("Assistentenrolle"). "Beheben" opens Android's voice-input settings. Choose "Lara im Ohr" as the digital assistant app. The line is fulfilled when it reads "Lara · Dienst gebunden", which means that Android has bound the app's assistant service. "Lara gewählt, Dienst noch nicht gebunden" means that the app is selected but the service is not bound yet. From then on the phone's assist gesture also goes to this app instead of your previous assistant, until you switch back in the same settings.
 5. **Make the app the target of the hearing-aid tap** ("Hörgeräte-Sprachtaste"). Unlock the phone and double-tap the hearing aid once. Android shows a chooser. Select "Lara im Ohr" and then "Always". The line then reads "→ Lara („Immer“)". The chooser is the only way to do this. There is no setting and no adb command for it (read from Android 17 source).
@@ -180,13 +182,14 @@ The echo test checks the audio path. It opens the voice link, records a few seco
 
 Start it in one of these ways:
 
+- Double-tap the hearing aid. This is what the tap does unless you change "Hörgeräte-Tap startet" (section "Einstellungen") to "Zählsitzung".
 - Press "Echo-Test jetzt" in the app (section "Messen").
 - Press button 3 of the remote during a count session (see below). The test then runs inside that session.
 - Send the adb command `lara.ECHO` (see [docs/adb-control.md](docs/adb-control.md)).
 
 The phone's assist gesture is wired to the same test. That trigger is not on the verified list.
 
-Earlier builds started the echo test on the double tap, and that is the combination that was verified on the device. The tap now opens a count session, which uses the same voice link but has not run on the device yet.
+Tap, voice link, recording from the hearing aid: that is the combination that was verified on the device, with a build in which the tap activity started the test itself. In the present source the tap passes through the input router first; that step has not run on the device.
 
 What you hear in the hearing aid:
 
@@ -213,7 +216,7 @@ Built, not yet tried on the device. This is the measurement "wake by tap, naviga
 
 Open it in one of these ways:
 
-- Lock the phone, wait until the display is off, and double-tap the hearing aid.
+- Set "Hörgeräte-Tap startet" to "Zählsitzung" (section "Einstellungen"; the default is the echo test), lock the phone, wait until the display is off, and double-tap the hearing aid.
 - Press a button of the remote, if "Shelly weckt auf" is switched on (section "Einstellungen"; on by default). That press is number one.
 - Press "Zählsitzung starten" in the app, or send the adb command `lara.COUNT`.
 
@@ -221,14 +224,21 @@ In the session:
 
 | You do | You hear |
 |---|---|
-| Press button 1, 2 or 4, with any gesture | The next number |
+| Press button 1, 2 or 4 | The next number |
+| Hold button 1, 2 or 4 | Nothing while you hold it; the next number when you let go |
 | Press button 3 | The echo test, inside the same session |
 | Nothing for 20 seconds | The falling pair of tones: the session closes |
 | Double-tap the hearing aid | The session ends |
 
-If the packet numbers of the remote show that something it sent did not arrive, you hear "einer fehlt" (or "zwei fehlen" and so on) before the number. The remote numbers every packet it sends, so this can also be a lost beacon and not a lost press. If presses arrive faster than numbers can be spoken, only the newest number is spoken; the journal still has a `session_count` line for every press.
+One number stands for one event of the remote, not for one movement of your finger. The remote decides on the gesture before it sends anything: two quick presses of the same button become one "double" and get one number. Leave about a second between presses, or shorten the multi-click delay of the remote. A held button is two events, "hold" while it is down and "long" (or "press") when it is released; that is what the remote of this project sent on 2026-11-27. The app counts only the second one, so a long press is one number, and on button 3 one echo test.
 
-The numbers are spoken by the phone's own speech engine, but not live: the app has each prompt synthesised into a file once, when the main screen is opened or the assistant service is bound, and plays the files itself. The line "Ansagen" in the checklist shows how many are ready. Where a prompt is missing (first start, no speech engine, no German voice), tones stand in: one to five short ticks for the numbers 1 to 5, a three-note figure for every higher number, and one long low tone for a loss.
+A packet with a gesture code the app does not know is journaled and does nothing: it opens no session, gets no number and starts no echo test.
+
+If the packet numbers of the remote show that something it sent did not arrive, you hear "einer fehlt" (or "zwei fehlen" and so on) before the number. The remote numbers every event it sends, so this can also be a lost beacon and not a lost press. Only gaps inside the session are spoken: what is missing before the first press of a session lies between the last thing received, maybe hours ago, and now, and stays in the journal (`missedBefore`). If presses arrive faster than numbers can be spoken, only the newest number is spoken; the journal still has a `session_count` line for every press.
+
+The numbers are spoken by the phone's own speech engine, but not live: the app has each prompt synthesised into a file once, when the main screen is opened or the assistant service is bound, and plays the files itself. The line "Ansagen" in the checklist shows how many are ready. There are spoken prompts for 1 to 99. Where a prompt is missing (first start, no speech engine, no German voice, a count above 99), tones stand in: one to five short ticks for the numbers 1 to 5, the same three-note figure for every higher number, and one long low tone for a loss. Without speech you can therefore check the count only up to 5.
+
+If you press right after the closing tones, the session service is still busy with the session that has just ended. The app then asks again every 0.4 s for up to 5 s (`input_retry` in the journal), so that press opens the next session and is its number one.
 
 With "Shelly weckt auf" switched off, a press outside a session opens nothing and plays nothing. It is only journaled and counted. That is the mode for measuring over hours how many presses Android's scan throttling lets through.
 
@@ -240,11 +250,13 @@ Everything is on one screen. The upper part scrolls and consists of sections tha
 |---|---|
 | "Einrichtung" | The checklist from "Install and set-up", plus the remote, the listener service and the spoken prompts |
 | "Messen" | "Echo-Test jetzt", "Zählsitzung starten", and a text field that writes a free-text marker into the journal ("ab jetzt 2 h Ruhe") |
-| "Zähler heute" | Events of the remote received and missed, hearing-aid taps, sessions by result. Counted from today's journal; simulated presses are left out |
-| "Shelly: Anlernen und Funk-Test" | A scan that runs only while the app is on the screen: pick the remote by pressing one of its buttons ("Anlernen"), forget it again ("Vergessen"), and watch its raw packets with a count of events and of missed events. The switch "Passive Scan-Art" changes the scan type for this scan and for the background scan |
-| "Einstellungen" | Scan mode outside and inside a session, the rescue scan, "Shelly weckt auf", and a button that makes the spoken prompts anew |
+| "Zähler heute" | Events of the remote received (and how many of them while the scan of the screen ran), gaps in its packet numbers ("Lücken"), hearing-aid taps, sessions by result. Counted from today's journal; simulated presses are left out |
+| "Shelly: Anlernen und Funk-Test" | A scan that runs only while the app is on the screen: pick the remote by pressing one of its buttons ("Anlernen"), forget it again ("Vergessen"), and watch its raw packets with a count of events and of gaps in its packet numbers ("Lücken"). The scan stops when the app leaves the screen. The switch "Passive Scan-Art" changes the scan type for this scan and for the background scan |
+| "Einstellungen" | What the hearing-aid tap starts ("Hörgeräte-Tap startet": echo test or count session), scan mode outside and inside a count session, the rescue scan, "Shelly weckt auf", and a button that makes the spoken prompts anew |
 
 For running a series of measurements from a computer, see [docs/adb-control.md](docs/adb-control.md).
+
+One setting is reachable only over adb: `refresh`, the number of minutes after which the app registers its scans anew as a precaution. It is 0 (off) by default, because it is part of what is measured. Registering anew stops the running scan. In the Android 17.0 source a scan books its use of the hourly allowance only when a delayed job fires (after 24 minutes in the balanced mode), and stopping the scan cancels that job. A scan that is replaced every 15 minutes would therefore never be throttled, and the result "the balanced mode always catches the press" would be the app's own doing. The alarm behind the refresh also wakes a dozing phone. Compare results only between runs with the same `refresh`; the value is in every `scan_started` line. Opening and closing a count session replaces the scan as well, which cannot be avoided: a scan cannot change its mode.
 
 ### The journal
 
@@ -258,7 +270,7 @@ adb logcat -s LaraJournal
 
 Each line is a JSON object with the keys `t` (wall-clock time in ms), `el` (ms since boot, counting sleep), `up` (ms since boot, not counting sleep), `type`, `f` (the fields of the event) and `ctx` (the state of the phone). If `el` advances more than `up` between two events, the phone slept in between.
 
-A successful echo test started from the screen looks like this. The event names are those at the time of writing.
+A successful echo test started from the screen looks like this. The event names are those at the time of writing. Started by a tap, it begins with `tap_intent` (Android started the app for the tap) and `input_routed` with `origin=tap`.
 
 ```text
 input_routed                          origin=screen route=start_echo
@@ -273,16 +285,19 @@ session_echo_played
 session_end                           result=ok
 ```
 
-A count session opened by a tap begins with `tap_intent` (Android started the app for the tap) and `input_routed`, opens the link with the same lines up to `session_link_up`, and then goes on like this:
+A count session begins with `input_routed` (`route=start_count`, or `wake_count` if a press of the remote opened it), opens the link with the same lines up to `session_link_up`, and then goes on like this:
 
 ```text
 session_count_open                    the program takes presses now
 shelly_press                          a press of the remote arrived
 input_routed                          origin=ble_callback route=to_session
 session_count                         number=1, said=true, voice=speech or tones, waitMs
-session_count_end                     count, reason=idle or tap
+session_count_held                    a button is held down; its number follows on release
+session_count_end                     count, reason=idle, aborted or tap
 session_end                           result=ok
 ```
+
+`reason=idle` is the normal end after 20 s without input. A second tap on the hearing aid normally reaches the app as a "stop" for the running session: the journal then shows `tap_stop`, `session_count_end` with `reason=aborted` and `session_end` with `result=cancelled`. The same lines without `tap_stop` mean that the link was lost. `reason=tap` appears only if Android delivers the tap as a new tap.
 
 Every `session_*` line carries `ms`, the time since the trigger. Lines to look for when something fails:
 
@@ -291,6 +306,13 @@ Every `session_*` line carries `ms`, the time since the trigger. Lines to look f
 - `assistant_unbound`: the system dropped the assistant service.
 - `input_dropped`: a press waited for a session that did not open, or arrived as the session closed.
 - `session_count` with `missed` above 0, `shelly_press` with `missedBefore` above 0: the remote sent something that did not arrive.
+- `shelly_packet` with `problem`: an advertisement of the remote that could not be read completely; `raw` has its bytes.
+
+Three marks tell you how far a line of the remote can be trusted as a background result. `fg=true` on `shelly_packet` and `shelly_press`: the scan of the screen ran, so the radio listened all the time. `late=true` on `shelly_packet`: the packet was received in time and delivered after its burst had been closed. `refreshMinutes` on `scan_started`: how often the scans are replaced on a timer (see below).
+
+What the scan of the screen itself hears is journaled as `fg_event`, and its totals are in the `scan_stopped` line of that scan.
+
+The loss count of the remote survives a restart of the app: the packet id received last is stored, and `process_start` shows it as `shellyLastId`.
 
 Lines that come from an input say where it came from, in the field `origin` (in `session_*` lines: `trigger`): `tap`, `ble_callback` or `ble_rescue` for the two scans of the remote, `screen`, `adb`, `simulated`, `assist`.
 

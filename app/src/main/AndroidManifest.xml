@@ -146,8 +146,9 @@
 
         <!-- Control from a computer for repeatable measurements, see docs/adb-control.md.
              Exported, because the adb shell is another app to Android. The permission is what
-             keeps everybody else out: the shell holds DUMP, an ordinary app cannot get it. No
-             intent filter: commands name this component. -->
+             keeps everybody else out: the shell holds DUMP, and an ordinary app gets it only if
+             the owner grants it over adb himself. No intent filter: commands name this
+             component. -->
         <receiver
             android:name=".control.AdbReceiver"
             android:exported="true"

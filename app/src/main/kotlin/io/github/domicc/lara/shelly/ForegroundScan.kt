@@ -2,7 +2,6 @@ package io.github.domicc.lara.shelly
 
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.app.ActivityManager.RunningAppProcessInfo
 import android.app.Application
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
@@ -11,7 +10,7 @@ import android.os.SystemClock
 import io.github.domicc.lara.core.bthome.BthomeParser
 import io.github.domicc.lara.core.bthome.ButtonEvent
 import io.github.domicc.lara.core.scan.ScanMode
-import io.github.domicc.lara.core.shelly.IdStep
+import io.github.domicc.lara.core.shelly.ShellyEvent
 import io.github.domicc.lara.core.shelly.ShellyTracker
 import io.github.domicc.lara.journal.Journal
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,7 +23,6 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * @param rssi signal strength of the newest advertisement in dBm; closer to 0 is nearer
  * @param packets advertisements received since the scan started
- * @param lastSeenMs time of the newest advertisement, on the elapsed-realtime clock
  * @param lastButton the button of the newest press, counted from 1; null if none was seen yet
  * @param lastEvent how [lastButton] was pressed
  * @param lastEventMs when that press arrived, on the elapsed-realtime clock
@@ -38,7 +36,6 @@ data class SeenDevice(
     val address: String,
     val rssi: Int,
     val packets: Int,
-    val lastSeenMs: Long,
     val lastButton: Int? = null,
     val lastEvent: ButtonEvent? = null,
     val lastEventMs: Long? = null,
@@ -56,7 +53,6 @@ data class SeenDevice(
  * @param problem why it is not a readable button packet, null if it is one
  */
 data class RawPacket(
-    val wallMs: Long,
     val elapsedMs: Long,
     val address: String,
     val rssi: Int,
@@ -78,11 +74,16 @@ data class RawPacket(
  *   Android's throttling, not to the remote or the parser.
  *
  * While it runs, the radio listens all the time for every scan on the phone, the listener's
- * included; `shelly_packet` lines journaled in that time are marked with `fg`. It therefore
- * stops itself as soon as the app is no longer on the screen (which includes the display going
- * dark): running on in the background it would use up the hour's allowance in minutes and
- * spoil the measurements that follow. That is a safety net: the screen should still call
- * [stop] when its view goes away, and has to call [start] again when it comes back.
+ * included; `shelly_packet` and `shelly_press` lines journaled in that time are marked with
+ * `fg`. It therefore stops itself as soon as the app is no longer on the screen (which
+ * includes the display going dark): running on in the background it would use up the hour's
+ * allowance in minutes and spoil the measurements that follow. That is a safety net: the
+ * screen should still call [stop] when its view goes away, and has to call [start] again when
+ * it comes back.
+ *
+ * What it hears is journaled as `fg_event`, one line per press of any sender and per event of
+ * the enrolled remote, so that a control run can be compared with a background run afterwards
+ * and not only from memory of the screen. Sensors that merely send their readings are left out.
  *
  * Nothing it hears is acted on: no press from here becomes an input. Main thread only.
  */
@@ -135,12 +136,18 @@ class ForegroundScan(
 
     private val leavesScreen = object : Application.ActivityLifecycleCallbacks {
         /**
-         * Asks Android instead of counting activities: the rating that drops here is the very
-         * one that ends the scan's exemption from throttling. It stays at "foreground" when
-         * the activity is only rebuilt or another activity of the app takes over.
+         * Stops when an activity of the app leaves the screen: Home, another app, the display
+         * going dark. Decided from the lifecycle itself and not by asking Android how it rates
+         * the process: Android lowers that rating a moment after this call (read from the
+         * Android 17 source), so the question could still be answered with "foreground", and
+         * nothing would ask again. An activity that is only rebuilt (rotation) disposes its
+         * view, which stops the scan as well.
+         *
+         * The app's second activity, for the hearing-aid tap, has no window and finishes while
+         * it is created, so it never gets here.
          */
         override fun onActivityStopped(activity: Activity) {
-            if (BleScans.importance() > RunningAppProcessInfo.IMPORTANCE_FOREGROUND) stop("left_screen")
+            if (!activity.isChangingConfigurations) stop("left_screen")
         }
 
         override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
@@ -187,7 +194,7 @@ class ForegroundScan(
         startedAtMs = now
         BleScans.starts.record(now)
         registered = callback
-        active = true
+        running++
         application.registerActivityLifecycleCallbacks(leavesScreen)
         stateFlow.value = State.RUNNING
         journal.log(
@@ -215,24 +222,59 @@ class ForegroundScan(
     private fun finish(state: State, reason: String, stopScan: Boolean) {
         val callback = registered ?: return
         registered = null
-        active = false
         application.unregisterActivityLifecycleCallbacks(leavesScreen)
-        if (stopScan) {
-            try {
-                BleScans.scanner(application)?.stopScan(callback)
-            } catch (e: Exception) {
-                journal.log("scan_failed", mapOf("scan" to "foreground", "where" to "stop", "exception" to e.toString()))
+        stateFlow.value = state
+        val watched = watched()
+        val about = mapOf(
+            "scan" to "foreground",
+            "reason" to reason,
+            "packets" to received,
+            "devices" to seen.size,
+            "events" to watched.sumOf { it.events },
+            "missed" to watched.sumOf { it.missed },
+        )
+        val startedAt = startedAtMs
+        if (!stopScan) {
+            // Android has ended the scan itself
+            running--
+            journal.log("scan_stopped", about + ("ms" to SystemClock.elapsedRealtime() - startedAt))
+            return
+        }
+        // A scan that was started a moment ago is stopped a moment later (see BleScans); the
+        // journal and the `fg` mark follow the real stop, not the tap on the button.
+        BleScans.stopWhenRegistered(application, callback, startedAt) { failure ->
+            running--
+            val ended = about + ("ms" to SystemClock.elapsedRealtime() - startedAt)
+            if (failure == null) {
+                journal.log("scan_stopped", ended)
+            } else {
+                journal.log("scan_failed", ended + mapOf("where" to "stop", "exception" to failure.toString()))
             }
         }
-        stateFlow.value = state
+    }
+
+    /** The senders the numbers are about: the enrolled remote if there is one, else all. */
+    private fun watched(): List<SeenDevice> {
+        val enrolled = store.remote.value ?: return seen.values.toList()
+        return seen.values.filter { it.address.equals(enrolled.address, ignoreCase = true) }
+    }
+
+    private fun journalEvent(event: ShellyEvent, rssi: Int, hex: String) {
+        val enrolled = store.remote.value?.address.equals(event.address, ignoreCase = true)
+        // a thermometer in range sends a new packet id every few seconds
+        if (event.presses.isEmpty() && !enrolled) return
         journal.log(
-            "scan_stopped",
+            "fg_event",
             mapOf(
-                "scan" to "foreground",
-                "reason" to reason,
-                "ms" to SystemClock.elapsedRealtime() - startedAtMs,
-                "packets" to received,
-                "devices" to seen.size,
+                "address" to event.address,
+                "enrolled" to enrolled,
+                "id" to event.packetId,
+                "presses" to event.presses.joinToString(",") { "${it.button}:${it.gesture.name.lowercase()}" },
+                "idStep" to event.idStep.name.lowercase(),
+                "missedBefore" to event.missedBefore,
+                "rssi" to rssi,
+                "tsMs" to event.elapsedMs,
+                "raw" to hex,
             ),
         )
     }
@@ -248,13 +290,14 @@ class ForegroundScan(
 
         val before = seen[address]
         val pressed = buttons.indexOfFirst { it != ButtonEvent.NONE }
+        val hex = data?.toHexString() ?: ""
         // the same id again after a pause is a held button heard in pieces, as in the intake
-        val event = packet?.let { tracker.onPacket(address, it, stampMs).event }?.takeIf { it.idStep != IdStep.SAME }
+        val event = packet?.let { tracker.onPacket(address, it, stampMs).event }?.takeIf { !it.repeatsPrevious }
+        if (event != null) journalEvent(event, result.rssi, hex)
         seen[address] = SeenDevice(
             address = address,
             rssi = result.rssi,
             packets = (before?.packets ?: 0) + 1,
-            lastSeenMs = stampMs,
             lastButton = if (pressed >= 0) pressed + 1 else before?.lastButton,
             lastEvent = if (pressed >= 0) buttons[pressed] else before?.lastEvent,
             lastEventMs = if (pressed >= 0) stampMs else before?.lastEventMs,
@@ -265,13 +308,12 @@ class ForegroundScan(
         deviceFlow.value = seen.values.toList()
 
         val raw = RawPacket(
-            wallMs = System.currentTimeMillis(),
             elapsedMs = stampMs,
             address = address,
             rssi = result.rssi,
             packetId = packet?.packetId,
             buttons = buttons,
-            hex = data?.toHexString() ?: "",
+            hex = hex,
             problem = BleScans.problemOf(data, packet),
         )
         packetFlow.value = (packetFlow.value + raw).takeLast(KEEP_PACKETS)
@@ -280,9 +322,11 @@ class ForegroundScan(
     companion object {
         private const val KEEP_PACKETS = 200
 
-        /** True while a scan of this kind runs anywhere in the process. */
+        /** Scans of this kind that were started and not stopped yet; main thread only. */
         @Volatile
-        var active = false
-            private set
+        private var running = 0
+
+        /** True while a scan of this kind runs anywhere in the process. */
+        val active: Boolean get() = running > 0
     }
 }

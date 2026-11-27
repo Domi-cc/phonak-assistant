@@ -16,8 +16,20 @@ import io.github.domicc.lara.core.bthome.ButtonEvent.UNKNOWN
  * outside the repository), with the ids used there. Input is the service data as Android
  * returns it for UUID 0xFCD2.
  *
- * R = captured from real devices, S = examples of the BTHome specification, Y = built from the
+ * R = from real devices, S = examples of the BTHome specification, Y = built from the
  * specification and the vendor's packet layout `44 00 pid 01 battery 3A b1 3A b2 3A b3 3A b4`.
+ * Not every R vector was seen on the air by somebody who says so: R2, R3, R4, R8 and R9 are
+ * taken from the test file of another decoder, and R10 was read from a device, not received as
+ * an advertisement.
+ *
+ * C = advertisements of the remote this app is built for (RC Button 4 without Zigbee,
+ * SBBT-004CUS), received by this app on the owner's phone on 27 November 2026. They are the
+ * only vectors here that are known to be what this remote really sends.
+ *
+ * Four vectors of the report are left out because they cannot be told from others without
+ * decryption or a key store, which version 0.1 does not have: S3b (S3 checked against a
+ * reversed sender address), Y30 and Y31 (Y27 with a wrong key and a wrong address) and Y33 (Y1
+ * from a remote that has a key).
  *
  * @param expected null if the parser has to reject the data
  */
@@ -48,11 +60,12 @@ object BthomeVectors {
     val real = listOf(
         // RC Button 4 ZB, firmware 1.2.13: button 2 pressed
         BthomeVector("R1", "44000e01643a003a013a003a00", triggered(14, 100, listOf(NONE, PRESS, NONE, NONE))),
-        // RC Button 4 without Zigbee, the model this app is built for: button 1 pressed
+        // said to be an RC Button 4 without Zigbee, from another decoder's tests: button 1 pressed
         BthomeVector("R2", "44001d01643a013a003a003a00", triggered(29, 100, button1(PRESS))),
-        // BLU Button1 with older firmware: one button object, trigger flag not set
+        // BLU Button1 with older firmware, from another decoder's tests: one button object,
+        // trigger flag not set
         BthomeVector("R3", "40001d01643a01", regular(29, 100, listOf(PRESS))),
-        // encrypted BLU Button1: cipher text, counter and check value
+        // encrypted BLU Button1, from another decoder's tests: cipher text, counter, check value
         BthomeVector("R4", "4562511158bd25b8f093645b573115", encrypted(0x45, triggerBased = true)),
         // BLU Motion ZB: a press followed by object 0x64, which is stepped over
         BthomeVector("R5", "44000801643a016401", triggered(8, 100, listOf(PRESS))),
@@ -60,11 +73,23 @@ object BthomeVectors {
         BthomeVector("R6", "440010016421006400", triggered(16, 100)),
         // BLU Door/Window: 0x53 here is the battery value 83, not the text object
         BthomeVector("R7", "4400020153050000002d003f0000", triggered(2, 83)),
+        // from another decoder's tests, like R9
         BthomeVector("R8", "44005d016405fc21002d013f9601", triggered(93, 100)),
         // BLU H&T with old firmware: hold sent as 0xFE
         BthomeVector("R9", "4400ae01642e383afe45fa00", triggered(174, 100, listOf(HOLD))),
-        // read from a device in pairing mode: runs into foreign bytes, unknown object 0xA9
+        // not an advertisement: read from a device in pairing mode over a connection. It runs
+        // into foreign bytes, unknown object 0xA9.
         BthomeVector("R10", "44000d5a10ffa90b01", triggered(13, stop = BthomeStop.UNKNOWN_OBJECT)),
+    )
+
+    val captured = listOf(
+        BthomeVector("C1", "44005d01643a013a003a003a00", triggered(93, 100, button1(PRESS))),
+        // a held button: "hold" while it is down ...
+        BthomeVector("C2", "44006201643a803a003a003a00", triggered(98, 100, button1(HOLD))),
+        // ... and "long" under the next packet id when it is released
+        BthomeVector("C3", "44006301643a043a003a003a00", triggered(99, 100, button1(LONG))),
+        BthomeVector("C4", "44006401643a003a023a003a00", triggered(100, 100, listOf(NONE, DOUBLE, NONE, NONE))),
+        BthomeVector("C5", "44006601643a003a003a003a03", triggered(102, 100, listOf(NONE, NONE, NONE, TRIPLE))),
     )
 
     val specification = listOf(
@@ -72,10 +97,8 @@ object BthomeVectors {
         BthomeVector("S1", "4002c40903bf13", regular()),
         // "3A003A01: no event for the first button, press for the second"
         BthomeVector("S2", "403a003a01", regular(buttons = listOf(NONE, PRESS))),
-        // The encryption example. S3b is the same packet checked against a reversed sender
-        // address; this app has no key, so both stay closed.
+        // the encryption example; this app has no key, so it stays closed
         BthomeVector("S3", "41e445f3c9962b332211006c7c4519", encrypted(0x41, triggerBased = false)),
-        BthomeVector("S3b", "41e445f3c9962b332211006c7c4519", encrypted(0x41, triggerBased = false)),
     )
 
     val synthetic = listOf(
@@ -116,21 +139,16 @@ object BthomeVectors {
         BthomeVector("Y25", "403a013c0103", regular(buttons = listOf(PRESS))),
         // reserved bit 1 set; the reference parser would read six address bytes first
         BthomeVector("Y26", "42a5808fe6485400073a01", null),
-        // Encrypted packets of a four-button remote. Y29 has a damaged check value, Y30 and Y31
-        // are Y27 checked with a wrong key and a wrong sender address, Y32 is Y27 with another
-        // device-information byte. Without decryption all of them just say "encrypted".
+        // Encrypted packets of a four-button remote. Y29 has a damaged check value, Y32 is Y27
+        // with another device-information byte. Without decryption all of them just say
+        // "encrypted".
         BthomeVector("Y27", "4590c30a24367381a0d7927ebf01e7226a7af5fd6b", encrypted(0x45, triggerBased = true)),
         BthomeVector("Y28", "4587794eea5f46236cc50a1f8f2ce7226a2c82c85c", encrypted(0x45, triggerBased = true)),
         BthomeVector("Y29", "4590c30a24367381a0d7927ebf01e7226a7af5fd00", encrypted(0x45, triggerBased = true)),
-        BthomeVector("Y30", "4590c30a24367381a0d7927ebf01e7226a7af5fd6b", encrypted(0x45, triggerBased = true)),
-        BthomeVector("Y31", "4590c30a24367381a0d7927ebf01e7226a7af5fd6b", encrypted(0x45, triggerBased = true)),
         BthomeVector("Y32", "4190c30a24367381a0d7927ebf01e7226a7af5fd6b", encrypted(0x41, triggerBased = false)),
-        // Y1 from a remote for which a key is stored: the report wants it dropped as a downgrade.
-        // That rule belongs to a key store, which version 0.1 does not have; the parser reads it.
-        BthomeVector("Y33", "44001001643a013a003a003a00", triggered(16, 100, button1(PRESS))),
     )
 
-    val all = real + specification + synthetic
+    val all = real + captured + specification + synthetic
 
     fun byId(id: String): BthomeVector = all.first { it.id == id }
 }

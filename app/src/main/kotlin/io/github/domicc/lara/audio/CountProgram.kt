@@ -5,6 +5,7 @@ import android.os.SystemClock
 import io.github.domicc.lara.core.count.CountSession
 import io.github.domicc.lara.core.count.CountStep
 import io.github.domicc.lara.core.input.Input
+import io.github.domicc.lara.core.journal.JournalNames
 import io.github.domicc.lara.input.InputRouter
 import io.github.domicc.lara.shelly.ListenerService
 import io.github.domicc.lara.speech.Announcer
@@ -17,7 +18,10 @@ import kotlinx.coroutines.launch
  * The count session, measurement 1 of the design: while the voice link is open, every press
  * of the remote that arrives is answered with its running number, so the wearer, who counts
  * along, hears at once when a press is lost. Button 3 runs the echo test inside the session.
- * The session ends normally after [IDLE_MS] without input, or at once with a hearing-aid tap.
+ * The session ends normally after [IDLE_MS] without input. A hearing-aid tap ends it at once:
+ * Android usually delivers that tap as a "stop" to the session service, which cancels the
+ * session (`reason=aborted`); only if it arrives as a new tap does the program end it itself
+ * (`reason=tap`).
  *
  * While it runs, the scan for the remote is in its session mode. The switch back is in a
  * finally block: a scan left in session mode spends the hour's scan allowance within minutes.
@@ -30,7 +34,8 @@ import kotlinx.coroutines.launch
  * If presses come faster than numbers can be said, only the newest number is said. Every press
  * still gets its `session_count` line.
  *
- * What a press does is decided by [CountSession]; this class plays and journals.
+ * What a press does and what is said for it is decided by [CountSession]; this class plays
+ * and journals.
  */
 class CountProgram(
     private val context: Context,
@@ -64,10 +69,8 @@ class CountProgram(
 
     private suspend fun count(link: AudioLink, inbox: ReceiveChannel<Input>): String {
         val counting = CountSession()
-        var result = "ok"
+        var result = JournalNames.RESULT_OK
         var echoes = 0
-        // losses not said yet, because the number they belonged to was skipped
-        var owedMissed = 0
         // an input taken from the inbox early, to see whether a newer number follows
         var ahead: Input? = null
         var quietSince = SystemClock.elapsedRealtime()
@@ -90,39 +93,36 @@ class CountProgram(
                 val about = InputRouter.fields(input) + ("waitMs" to SystemClock.elapsedRealtime() - input.elapsedMs)
                 when (val step = counting.onInput(input)) {
                     is CountStep.Announce -> {
-                        owedMissed += step.missed
                         ahead = inbox.tryReceive().getOrNull()
                         // not said if a newer number is waiting already
-                        val number = if (ahead?.let(counting::counts) == true) null else announcer.number(step.number)
-                        val missed = if (number != null && owedMissed > 0) announcer.missed(owedMissed) else null
+                        val said = counting.say(step, newerWaits = ahead?.let(counting::counts) == true)
+                        val number = said.number?.let(announcer::number)
                         link.step(
                             "count",
                             about + mapOf(
                                 "number" to step.number,
                                 "missed" to step.missed,
                                 "said" to (number != null),
+                                "saidMissed" to said.missed,
                                 "voice" to number?.kind,
                             ),
                         )
-                        if (missed != null) {
-                            link.play(missed.pcm)
+                        if (said.missed > 0) {
+                            link.play(announcer.missed(said.missed).pcm)
                             link.silence(HINT_GAP_MS)
-                            owedMissed = 0
                         }
                         if (number != null) link.play(number.pcm)
                     }
                     is CountStep.Echo -> {
-                        owedMissed += step.missed
-                        link.step("count_echo", about + ("missed" to step.missed))
-                        if (owedMissed > 0) {
-                            link.play(announcer.missed(owedMissed).pcm)
-                            owedMissed = 0
-                        }
+                        link.step("count_echo", about + ("saidMissed" to step.missed))
+                        if (step.missed > 0) link.play(announcer.missed(step.missed).pcm)
                         val echo = EchoProgram().run(link)
                         echoes++
                         // a session in which an echo test failed does not end as "ok"
-                        if (echo != "ok" && result == "ok") result = echo
+                        if (echo != JournalNames.RESULT_OK && result == JournalNames.RESULT_OK) result = echo
                     }
+                    // the number follows when the button is released
+                    CountStep.Held -> link.step("count_held", about)
                     CountStep.End -> {
                         link.step("count_stop", about)
                         reason = "tap"

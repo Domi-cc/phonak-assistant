@@ -77,7 +77,9 @@ android {
     }
 
     lint {
-        abortOnError = false
+        // An error (a missing permission check, a call above minSdk) stops the build instead of
+        // ending up in a report nobody opens. Warnings do not.
+        abortOnError = true
     }
 }
 

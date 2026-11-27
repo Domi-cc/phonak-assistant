@@ -14,7 +14,7 @@ import io.github.domicc.lara.LaraApp
 import io.github.domicc.lara.core.stats.DayStats
 
 /** For the folded counters: the two numbers a measurement is about. */
-fun countersSummary(stats: DayStats): String = "Shelly ${stats.shellyEvents} · verpasst ${stats.shellyMissed}"
+fun countersSummary(stats: DayStats): String = "Shelly ${stats.shellyEvents} · Lücken ${stats.shellyMissed}"
 
 /**
  * Today's numbers, counted from the journal (see [io.github.domicc.lara.journal.DayCounters]).
@@ -23,14 +23,17 @@ fun countersSummary(stats: DayStats): String = "Shelly ${stats.shellyEvents} · 
 @Composable
 fun CountersSection() {
     val stats by LaraApp.instance.counters.today.collectAsState()
-    CounterRow("Shelly-Ereignisse", "${stats.shellyEvents} empfangen · ${stats.shellyMissed} verpasst")
+    // presses heard while the scan of the screen ran say nothing about the background
+    val withControl = if (stats.shellyWithControlScan > 0) " (davon ${stats.shellyWithControlScan} bei laufendem Funk-Test)" else ""
+    CounterRow("Shelly-Ereignisse", "${stats.shellyEvents} empfangen$withControl · ${stats.shellyMissed} Lücken")
     CounterRow("Hörgeräte-Taps", stats.taps.toString())
     CounterRow(
         "Sitzungen",
         "${stats.sessionsOk} ok · ${stats.sessionsCancelled} abgebrochen · ${stats.sessionsFailed} fehlgeschlagen",
     )
     Text(
-        "Aus dem Protokoll von heute gezählt. „Verpasst“ zählt die Lücken in den Paketnummern des Shelly; simulierte Drücke zählen nicht.",
+        "Aus dem Protokoll von heute gezählt. „Lücken“ sind fehlende Paketnummern des Shelly: meist ein verlorener Druck, " +
+            "manchmal nur seine Bake oder ein Neustart des Shelly. Simulierte Drücke zählen nicht.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 2.dp),

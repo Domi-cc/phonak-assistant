@@ -6,9 +6,9 @@
 # whose manifest lacks one of the three services, is dropped from the role without any message
 # and the phone's default assistant takes over. The hearing-aid tap has the same weakness:
 # Android sends it to the activity the owner once chose as "Always" for VOICE_COMMAND and forgets
-# that choice when the activity is renamed, disabled or loses its filter. The compiler does not
-# look at any of this and lint does not stop the build, so CI and the release workflow run this
-# script before they build.
+# that choice when the activity is renamed, disabled or loses its filter. Neither the compiler
+# nor lint looks at any of this, so CI and the release workflow run this script before they
+# build.
 #
 # It reads source files only: no SDK, no build. POSIX sh has no XML parser, so it matches text.
 # Comments are removed and blanks normalised first; then every check looks for name="value"

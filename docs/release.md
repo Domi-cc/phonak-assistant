@@ -81,5 +81,21 @@ Each failure names its reason as an error annotation on the run.
 | Keystore secret unusable | The keystore, its password or the alias do not fit together. Set all four secrets again from `keystore.properties`. |
 | Assistant metadata incomplete | `tools/check-assistant-metadata.sh` found the manifest or `voice_interaction_service.xml` incomplete. Such a build would silently lose the assistant role on the phone. Run the script locally and fix what it lists. |
 | Wrong signing key, Wrong version in APK | `app/build.gradle.kts` no longer reads the `LARA_*` variables or the `lara.versionName` and `lara.versionCode` properties the workflow passes. |
+| Unexpected build output | The release build did not leave exactly one APK in `app/build/outputs/apk/release`. Something in `app/build.gradle.kts` changed what is built (a flavour, an ABI split). |
+| No build-tools | The runner image has no `apksigner`. Check that the job still runs on `ubuntu-24.04`, which ships the Android SDK. |
+| Signature does not verify | `apksigner verify` rejects the APK. Re-run the job once; if it stays, the build produced a damaged or unsigned APK and `app/build.gradle.kts` is the place to look. |
+
+A failing Gradle step is not on this list: the unit tests run again in this job, and its log names the test that failed.
 
 If the job stops with "a release with the same tag name already exists", delete that release (`gh release delete <tag>`, the tag stays) and re-run the job.
+
+## Updating the actions
+
+Both workflows name the GitHub actions they use by commit, with the release as a comment, because a tag such as `v6` can be moved to other code and the release job holds the signing key. To move to a newer release of an action, look up the commit of its tag and change both workflow files:
+
+```sh
+git ls-remote https://github.com/gradle/actions 'refs/tags/v6.4.1^{}' 'refs/tags/v6.4.1'
+```
+
+For a tag that is an object of its own the line ending in `^{}` is the commit to use; otherwise there is only one line.
+

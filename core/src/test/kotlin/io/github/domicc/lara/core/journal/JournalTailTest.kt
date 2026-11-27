@@ -12,6 +12,39 @@ class JournalTailTest {
         return lines to consumed
     }
 
+    private fun lastLines(text: String, fromStart: Boolean, max: Int = 300) =
+        JournalTail.lastLines(text.toByteArray(Charsets.UTF_8), fromStart, max)
+
+    @Test
+    fun `the end of a file read from its start is all of its lines`() {
+        assertEquals(listOf("one", "two", "three"), lastLines("one\ntwo\nthree\n", fromStart = true))
+        assertEquals(emptyList(), lastLines("", fromStart = true))
+    }
+
+    @Test
+    fun `the first line of an end that begins inside the file is left out`() {
+        // "...e\ntwo\nthree\n": the read began in the middle of the first line
+        assertEquals(listOf("two", "three"), lastLines("e\ntwo\nthree\n", fromStart = false))
+        // also if it began exactly at a line break: whether it did cannot be known
+        assertEquals(listOf("three"), lastLines("two\nthree\n", fromStart = false))
+        assertEquals(emptyList(), lastLines("no line break at all", fromStart = false))
+    }
+
+    @Test
+    fun `only the newest lines are kept, oldest first`() {
+        val text = (1..10).joinToString("") { "line $it\n" }
+        assertEquals(listOf("line 8", "line 9", "line 10"), lastLines(text, fromStart = true, max = 3))
+    }
+
+    @Test
+    fun `a last line without a line break is kept and umlauts survive a cut in front of them`() {
+        // a process that died while writing leaves half a line; the decoder rejects it later
+        assertEquals(listOf("one", "{\"half"), lastLines("one\n{\"half", fromStart = true))
+        // the read began inside the two bytes of "ä": the damaged first line is dropped anyway
+        val bytes = "Zähler\nHörgerät\n".toByteArray(Charsets.UTF_8)
+        assertEquals(listOf("Hörgerät"), JournalTail.lastLines(bytes.copyOfRange(2, bytes.size), fromStart = false, max = 300))
+    }
+
     @Test
     fun `complete lines are handed over and counted`() {
         assertEquals(listOf("one", "two") to 8L, read("one\ntwo\n"))

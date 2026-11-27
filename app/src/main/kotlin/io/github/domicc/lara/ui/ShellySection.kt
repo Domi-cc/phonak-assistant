@@ -96,7 +96,7 @@ fun ShellySection() {
     // With a remote enrolled the test is about that remote only.
     val watched = remote?.let { enrolled -> devices.filter { it.address.equals(enrolled.address, ignoreCase = true) } } ?: devices
     Text(
-        "Ereignisse: ${watched.sumOf { it.events }} · verpasst: ${watched.sumOf { it.missed }} · Pakete: ${watched.sumOf { it.packets }}",
+        "Ereignisse: ${watched.sumOf { it.events }} · Lücken: ${watched.sumOf { it.missed }} · Pakete: ${watched.sumOf { it.packets }}",
         style = MaterialTheme.typography.bodyMedium,
         fontWeight = FontWeight.Bold,
         modifier = Modifier.padding(top = 4.dp),
@@ -146,7 +146,7 @@ private fun DeviceRow(device: SeenDevice, enrolled: Boolean, onEnrol: () -> Unit
                     val button = device.lastButton
                     val at = device.lastEventMs
                     if (button != null && at != null) {
-                        append(" · Taste $button ${device.lastEvent?.name?.lowercase()} um ${clock.format(Date(wallTime(at)))}")
+                        append(" · Taste $button ${device.lastEvent?.let(::gestureLabel)} um ${clock.format(Date(wallTime(at)))}")
                     }
                     if (device.encrypted) append(" · verschlüsselt, nicht lesbar")
                 },
@@ -165,7 +165,7 @@ private fun DeviceRow(device: SeenDevice, enrolled: Boolean, onEnrol: () -> Unit
 @Composable
 private fun PacketLine(packet: RawPacket) {
     val pressed = packet.buttons
-        .mapIndexedNotNull { index, event -> if (event == ButtonEvent.NONE) null else "${index + 1}:${event.name.lowercase()}" }
+        .mapIndexedNotNull { index, event -> if (event == ButtonEvent.NONE) null else "${index + 1}:${gestureLabel(event)}" }
         .joinToString(",")
         .ifEmpty { "–" }
     Text(
@@ -177,6 +177,20 @@ private fun PacketLine(packet: RawPacket) {
         color = if (packet.problem != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.padding(vertical = 1.dp),
     )
+}
+
+/** How a button was pressed, in the words of the screen. */
+private fun gestureLabel(event: ButtonEvent): String = when (event) {
+    ButtonEvent.NONE -> "–"
+    ButtonEvent.PRESS -> "einfach"
+    ButtonEvent.DOUBLE -> "doppelt"
+    ButtonEvent.TRIPLE -> "dreifach"
+    ButtonEvent.LONG -> "lang"
+    ButtonEvent.LONG_DOUBLE -> "lang-doppelt"
+    ButtonEvent.LONG_TRIPLE -> "lang-dreifach"
+    ButtonEvent.HOLD -> "gehalten"
+    ButtonEvent.HOLD_RELEASE -> "losgelassen"
+    ButtonEvent.UNKNOWN -> "unbekannt"
 }
 
 /** The wall-clock time of a moment given on the clock the Bluetooth stack stamps packets with. */

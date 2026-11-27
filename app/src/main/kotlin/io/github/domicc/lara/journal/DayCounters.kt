@@ -17,8 +17,11 @@ import java.io.IOException
 
 /**
  * The numbers of today for the screen. They are counted from today's journal file, not kept
- * next to it: so they are right after the process was killed and restarted in the middle of a
- * measurement, and they start at zero with the new file at midnight.
+ * next to it: so a process that was killed and restarted in the middle of a measurement shows
+ * the same numbers as before, and they start at zero with the new file at midnight. The
+ * losses in them are the ones the app wrote into its lines; that they are also right across a
+ * restart is the job of the packet id the app keeps in its preferences (see
+ * [io.github.domicc.lara.shelly.ShellyStore.lastPacketId]).
  *
  * Nothing happens until somebody calls [refresh], which the screen does while it is visible.
  * The first call reads the whole file, every later one only what has been appended since.

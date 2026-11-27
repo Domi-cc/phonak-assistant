@@ -8,7 +8,9 @@ The app can be driven from a computer, so that a series of measurements can be r
 
 The app has one broadcast receiver for this, `io.github.domicc.lara/.control.AdbReceiver`. Android delivers a broadcast to it only if the sender holds `android.permission.DUMP`. The adb shell holds that permission. An ordinary app cannot get it: it is granted to system apps only, or by hand over adb to an app that asks for it in its manifest. So nothing that is merely installed on the phone can send these commands.
 
-Every command is written to the journal as `adb_command` before it does anything. A command the app cannot carry out is journaled as `adb_rejected`, and nothing is changed.
+The one exception is of your own making: an app to which you have granted `DUMP` over adb (some diagnostic tools ask for that) can send these commands too, which includes starting a session with the microphone. `adb shell dumpsys package <package>` lists the permissions an app was granted.
+
+Every command is written to the journal as `adb_command` before it does anything. A command the app cannot carry out exactly as given is journaled as `adb_rejected`, and nothing is changed: a value of the wrong kind, a number outside its range and a setting name the app does not know all reject the whole command.
 
 ## Sending a command
 
@@ -28,7 +30,7 @@ lara -a lara.STATUS
 The answer is the last line that `am` prints:
 
 ```text
-Broadcast completed: result=0, data="ok idle=low_power session=balanced passive=true rescue=false refresh=15 wake=true ..."
+Broadcast completed: result=0, data="ok idle=low_power session=balanced passive=true rescue=false refresh=0 wake=true tap=echo ..."
 ```
 
 `data` starts with `ok` or with `error:` followed by the reason. A line without `data` means that the broadcast did not reach the app; see "If nothing happens".
@@ -57,18 +59,22 @@ lara -a lara.MARK --es text "'ab jetzt 2 h Ruhe'"
 | Extra | Values | Setting on the screen |
 |---|---|---|
 | `--es idle` | `low_power`, `balanced`, `low_latency` | "Scan ohne Sitzung" (spar, mittel, schnell) |
-| `--es session` | `low_power`, `balanced`, `low_latency` | "Scan in der Sitzung" |
+| `--es session` | `low_power`, `balanced`, `low_latency` | "Scan in der Sitzung": the mode while a count session is open. An echo test on its own does not change the scan. |
 | `--ez passive` | `true`, `false` | "Passive Scan-Art"; `false` is Android's default scan type |
 | `--ez rescue` | `true`, `false` | "Rettungs-Scan" |
 | `--ez wake` | `true`, `false` | "Shelly weckt auf"; `false` is the silent mode in which presses outside a session are only journaled and counted |
-| `--ei refresh` | minutes, 0 to 1440 | How often the scans are registered anew as a precaution; 0 switches that off. Not on the screen. |
+| `--es tap` | `echo`, `count` | "Hörgeräte-Tap startet": what a double tap on the hearing aid starts. The default is `echo`. |
+| `--ei refresh` | minutes, 0 to 1440 | How often the scans are registered anew as a precaution; 0, the default, switches that off. Not on the screen. See the warning below. |
 
 ```sh
 lara -a lara.SET --es idle low_power --es session low_latency
 lara -a lara.SET --ez rescue true --ez wake false
+lara -a lara.SET --es tap count
 ```
 
-A running listener applies a change at once and journals it (`scan_settings`, `shelly_wakes`, then `scan_started`). Android allows an app only a few scan starts per half minute. If you change modes faster than that, the app waits and journals `scan_deferred`; leave a few seconds between two changes.
+**`refresh` changes what you measure.** Registering anew means stopping the running scan and starting another. In the Android 17.0 source a scan books its use of the hourly scan allowance only when a delayed job fires (after 6 minutes in `low_latency`, after 24 minutes in `balanced`), and stopping the scan cancels that job. With `refresh` below those times a scan is never throttled, and a catch rate measured that way says nothing about Android's limits. The alarm behind `refresh` also wakes a dozing phone. So: keep `refresh` at 0 for measurements, or treat it as one more thing you vary, and compare catch rates only between runs with the same value. Every `scan_started` line carries it as `refreshMinutes`. Without the refresh the scans are still registered anew when Bluetooth comes back, when the process starts and when the app is updated.
+
+Every change is journaled (`scan_settings`, `shelly_wakes`, `tap_setting`), and a running listener applies a changed scan setting at once (`scan_started`). Android allows an app only a few scan starts per half minute. If you change modes faster than that, the app waits and journals `scan_deferred`; leave a few seconds between two changes.
 
 ### Simulated presses
 
@@ -81,7 +87,11 @@ lara -a lara.PRESS --ei button 1 --ei missed 1
 
 Gestures: `press`, `double`, `triple`, `long`, `long_double`, `long_triple`, `hold`, `hold_release`, `unknown`.
 
-A simulated press takes the same way through the app as a real one from the point where a real one has been recognised: input bus, router, session. Buttons 1, 2 and 4 are counted aloud, button 3 runs the echo test, and with "Shelly weckt auf" switched on a press outside a session opens one. `--ei missed 1` makes the press claim that one event was lost before it, so that you hear "einer fehlt".
+A simulated press takes the same way through the app as a real one from the point where a real one has been recognised: input bus, router, session. Buttons 1, 2 and 4 are counted aloud, button 3 runs the echo test, and with "Shelly weckt auf" switched on a press outside a session opens one.
+
+Three gestures behave differently, as they do for the real remote. `hold` and `hold_release` get no number and start no echo test (`session_count_held`): the remote sends `long` or `press` when a held button is released, and that is what counts. `hold` still opens a session. `unknown` does nothing anywhere (`input_routed` with `route=none`).
+
+`--ei missed 1` makes the press claim that one event was lost before it, so that you hear "einer fehlt". Not with the first press of a session: a loss before it is not spoken, because it lies before the session. Send an ordinary press first.
 
 It tests nothing of the radio path. To keep the measurements clean, a simulated press
 
@@ -94,10 +104,10 @@ A session that a simulated press opens is a real session with the hearing aid an
 ### The answer of `lara.STATUS`
 
 ```text
-ok idle=low_power session=balanced passive=true rescue=false refresh=15 wake=true enrolled=true scan=low_power/passive listener=true sessionOpen=false assistantBound=true prompts=101/101
+ok idle=low_power session=balanced passive=true rescue=false refresh=0 wake=true tap=echo enrolled=true scan=low_power/passive listener=true sessionOpen=false assistantBound=true prompts=101/101
 ```
 
-`scan` is what is registered right now (`off` if nothing is). `sessionOpen` is true while a count session runs. `prompts` is how many spoken prompts are ready; while some are missing the app plays tones instead.
+`scan` is what is registered right now: mode and scan type of the listener's scan, or `off` if there is none, followed by `+rescue` if the rescue scan is registered. So `low_power/passive`, `balanced/active+rescue`, `off` and `off+rescue` are all possible. `sessionOpen` is true while a count session runs. `prompts` is how many spoken prompts are ready; while some are missing the app plays tones instead.
 
 ## Following along
 
@@ -132,6 +142,7 @@ for i in $(seq 1 20); do
     sleep 2
 done
 sleep 25                                  # the session closes after 20 s without input
+                                          # you should have heard "eins" to "zwanzig"
 
 lara -a lara.SET --es session low_latency
 lara -a lara.MARK --es text "'Reihe 2: echter Shelly, Sitzung schnell'"

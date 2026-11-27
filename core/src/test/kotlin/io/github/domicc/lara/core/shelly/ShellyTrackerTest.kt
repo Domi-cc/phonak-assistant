@@ -3,6 +3,7 @@ package io.github.domicc.lara.core.shelly
 import io.github.domicc.lara.core.bthome.BthomePacket
 import io.github.domicc.lara.core.bthome.BthomeParser
 import io.github.domicc.lara.core.bthome.BthomeVectors
+import io.github.domicc.lara.core.bthome.ButtonEvent
 import io.github.domicc.lara.core.input.Gesture
 import io.github.domicc.lara.core.input.Input
 import io.github.domicc.lara.core.input.InputPath
@@ -10,6 +11,7 @@ import io.github.domicc.lara.core.input.InputSource
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -45,7 +47,6 @@ class ShellyTrackerTest {
             listOf(ShellyEvent(REMOTE, 14, listOf(ShellyPress(2, Gesture.PRESS)), IdStep.UNKNOWN, 0, 1_000)),
             events,
         )
-        assertEquals(ShellyTotals(received = 1, pressesByButton = mapOf(2 to 1)), tracker.totals())
     }
 
     @Test
@@ -111,7 +112,8 @@ class ShellyTrackerTest {
         assertEquals(IdStep.UNKNOWN, first.idStep)
         assertEquals(IdStep.SAME, second.idStep)
         assertEquals(0, second.missedBefore)
-        assertEquals(ShellyTotals(received = 2, pressesByButton = mapOf(2 to 2)), tracker.totals())
+        assertTrue(second.repeatsPrevious)
+        assertFalse(first.repeatsPrevious)
     }
 
     @Test
@@ -126,7 +128,7 @@ class ShellyTrackerTest {
     fun `consecutive ids lose nothing`() {
         val steps = (10..15).map { assertNotNull(feed(press(it), it * 2_000L)) }
         assertEquals(listOf(IdStep.UNKNOWN) + List(5) { IdStep.NEXT }, steps.map { it.idStep })
-        assertEquals(0, tracker.totals().missed)
+        assertEquals(0, steps.sumOf { it.missedBefore })
     }
 
     @Test
@@ -135,8 +137,6 @@ class ShellyTrackerTest {
         val event = assertNotNull(feed(press(0), 3_000))
         assertEquals(IdStep.NEXT, event.idStep)
         assertEquals(0, event.missedBefore)
-        assertEquals(2, tracker.totals().received)
-        assertEquals(0, tracker.totals().missed)
     }
 
     @Test
@@ -145,7 +145,6 @@ class ShellyTrackerTest {
         val event = assertNotNull(feed(press(13), 5_000))
         assertEquals(IdStep.GAP, event.idStep)
         assertEquals(2, event.missedBefore)
-        assertEquals(2, tracker.totals().missed)
     }
 
     @Test
@@ -163,10 +162,6 @@ class ShellyTrackerTest {
         assertEquals(IdStep.RESTART, event.idStep)
         assertEquals(0, event.missedBefore)
         assertEquals(listOf(ShellyPress(1, Gesture.PRESS)), event.presses)
-        val totals = tracker.totals()
-        assertEquals(2, totals.received)
-        assertEquals(0, totals.missed)
-        assertEquals(1, totals.restarts)
         // counting goes on from the new value
         assertEquals(IdStep.NEXT, feed(press(1), 20_000)?.idStep)
     }
@@ -174,10 +169,9 @@ class ShellyTrackerTest {
     @Test
     fun `a backwards step is a restart`() {
         feed(press(10), 0)
-        assertEquals(IdStep.RESTART, feed(press(9), 10_000)?.idStep)
-        assertEquals(IdStep.RESTART, feed(press(3), 20_000)?.idStep)
-        assertEquals(0, tracker.totals().missed)
-        assertEquals(2, tracker.totals().restarts)
+        val steps = listOf(feed(press(9), 10_000), feed(press(3), 20_000)).map { assertNotNull(it) }
+        assertEquals(listOf(IdStep.RESTART, IdStep.RESTART), steps.map { it.idStep })
+        assertEquals(0, steps.sumOf { it.missedBefore })
     }
 
     @Test
@@ -217,7 +211,6 @@ class ShellyTrackerTest {
             ),
             event.toInputs(InputPath.BLE_CALLBACK),
         )
-        assertEquals(ShellyTotals(received = 1, pressesByButton = mapOf(1 to 1, 3 to 1)), tracker.totals())
     }
 
     @Test
@@ -242,7 +235,7 @@ class ShellyTrackerTest {
             "Y7" to Gesture.HOLD,
             "Y8" to Gesture.HOLD_RELEASE,
             "Y9" to Gesture.HOLD,
-            // a code the app does not know is still a use of the button
+            // a code the app does not know is still reported; the router refuses to act on it
             "Y10" to Gesture.UNKNOWN,
         )
         for ((id, gesture) in expected) {
@@ -267,7 +260,6 @@ class ShellyTrackerTest {
         assertTrue(beacon.presses.isEmpty())
         val next = assertNotNull(feed(remotePacket(20, 0x01), 30_000))
         assertEquals(IdStep.NEXT, next.idStep)
-        assertEquals(ShellyTotals(received = 2, beacons = 2, pressesByButton = mapOf(1 to 2)), tracker.totals())
     }
 
     @Test
@@ -282,7 +274,6 @@ class ShellyTrackerTest {
         assertNull(feed(vector("R1"), 200))
         // packet id 15 follows 14, not the beacon
         assertEquals(IdStep.NEXT, feed(remotePacket(15, 0, 0x01), 5_000)?.idStep)
-        assertEquals(ShellyTotals(received = 2, beacons = 1, pressesByButton = mapOf(2 to 2)), tracker.totals())
     }
 
     @Test
@@ -297,7 +288,6 @@ class ShellyTrackerTest {
         assertEquals(listOf(ShellyPress(1, Gesture.PRESS)), feed(vector("Y25"), 600)?.presses)
         // the same content after the window as well
         assertNotNull(feed(vector("S2"), 500 + window))
-        assertEquals(0, tracker.totals().missed)
     }
 
     @Test
@@ -307,7 +297,6 @@ class ShellyTrackerTest {
         assertNull(update.event)
         assertTrue(update.finished.isEmpty())
         assertEquals(IdStep.NEXT, feed(press(6), 5_000)?.idStep)
-        assertEquals(ShellyTotals(received = 2, pressesByButton = mapOf(1 to 2)), tracker.totals())
     }
 
     @Test
@@ -353,31 +342,120 @@ class ShellyTrackerTest {
     }
 
     @Test
-    fun `totals can be read and reset without losing track of the ids`() {
-        // ids 1 2 4 5 9: three and then six, seven and eight are missing
-        for ((index, id) in listOf(1, 2, 4, 5, 9).withIndex()) feed(remotePacket(id, 0, 0, 0x02), index * 10_000L)
-        feed(remotePacket(10, 0x04), 60_000)
-        assertEquals(ShellyTotals(received = 6, missed = 4, pressesByButton = mapOf(1 to 1, 3 to 5)), tracker.totals())
+    fun `a repeat that is delivered after its burst was closed starts nothing`() {
+        assertNotNull(feed(press(5), 0))
+        assertNull(feed(press(5), 900))
+        // the next press arrives and closes the burst of id 5
+        val closing = tracker.onPacket(REMOTE, press(6), 6_000)
+        assertEquals(listOf(5), closing.finished.map { it.event.packetId })
+        // now the rescue scan hands over what it received of id 5, seconds late
+        val late = tracker.onPacket(REMOTE, press(5), 400)
+        assertNull(late.event)
+        assertTrue(late.late)
+        assertTrue(tracker.onPacket(REMOTE, press(5), 950).late, "anything within the window of the burst's last packet")
+        // and the count of ids is where it was: 7 follows 6, nothing was lost
+        val next = assertNotNull(feed(press(7), 12_000))
+        assertEquals(IdStep.NEXT, next.idStep)
+        assertEquals(0, next.missedBefore)
+    }
 
-        tracker.resetTotals()
-        assertEquals(ShellyTotals(), tracker.totals())
+    @Test
+    fun `a packet that is on time is never taken for a late one`() {
+        val update = tracker.onPacket(REMOTE, press(5), 0)
+        assertFalse(update.late)
+        assertFalse(tracker.onPacket(REMOTE, press(5), 20).late, "a repeat of an open burst is in its statistics")
+        tracker.takeFinished(window + 20)
+        // the same id received a window after the burst is a new event, as before
+        val again = tracker.onPacket(REMOTE, press(5), window + 20)
+        assertFalse(again.late)
+        assertEquals(IdStep.SAME, again.event?.idStep)
+    }
 
-        // 10 is still known as the last id: 12 means one event was missed
-        val event = assertNotNull(feed(remotePacket(12, 0, 0x01), 70_000))
-        assertEquals(1, event.missedBefore)
-        assertEquals(ShellyTotals(received = 1, missed = 1, pressesByButton = mapOf(2 to 1)), tracker.totals())
+    @Test
+    fun `the id is back where it was after 256 events and still starts a new event`() {
+        for (i in 0..256) assertNotNull(feed(press(i and 0xFF), i * 10_000L), "event $i")
+    }
+
+    @Test
+    fun `a packet whose buttons could not be read does not hide the press that follows`() {
+        // Y18: packet id 7, cut off inside the first button object
+        val cut = tracker.onPacket(REMOTE, vector("Y18"), 1_000)
+        assertNull(cut.event)
+        assertFalse(cut.late)
+        // the complete packet of the same burst is the press
+        val event = assertNotNull(feed(press(7), 1_020))
+        assertEquals(listOf(ShellyPress(1, Gesture.PRESS)), event.presses)
+        // from now on the cut packet is one more repeat of that burst
+        assertNull(feed(vector("Y18"), 1_040))
+        // the cut packet that came first is in no burst
+        assertEquals(2, tracker.takeFinished(60_000).single().packets)
+    }
+
+    @Test
+    fun `an unreadable packet does not move the count of ids`() {
+        feed(press(4), 0)
+        // R10: packet id 13, then an object this app cannot step over, no button read
+        assertNull(feed(vector("R10"), 10_000))
+        val next = assertNotNull(feed(press(5), 20_000))
+        assertEquals(IdStep.NEXT, next.idStep)
+    }
+
+    @Test
+    fun `a press in front of an unknown object is still an event`() {
+        // Y17: press of button 1, then unknown object 0xA9
+        assertEquals(listOf(ShellyPress(1, Gesture.PRESS)), feed(vector("Y17"), 0)?.presses)
+    }
+
+    @Test
+    fun `the last id of an earlier process makes a loss across the restart count`() {
+        // the process that received id 40 is gone; ids 41 to 47 were sent meanwhile
+        tracker.seed(REMOTE, 40)
+        val event = assertNotNull(feed(press(48), 5_000))
+        assertEquals(IdStep.GAP, event.idStep)
+        assertEquals(7, event.missedBefore)
+    }
+
+    @Test
+    fun `without a last id the first event of a process has nothing to compare with`() {
+        val event = assertNotNull(feed(press(48), 5_000))
+        assertEquals(IdStep.UNKNOWN, event.idStep)
+        assertEquals(0, event.missedBefore)
+    }
+
+    @Test
+    fun `after a restart the next id is no loss and the same id is a repeat`() {
+        tracker.seed(REMOTE, 255)
+        assertEquals(IdStep.NEXT, feed(press(0), 1_000)?.idStep)
+
+        // the process died in the middle of a burst and is started again by a packet of it
+        val other = ShellyTracker()
+        other.seed(REMOTE, 12)
+        val again = assertNotNull(other.onPacket(REMOTE, press(12), 1_000).event)
+        assertTrue(again.repeatsPrevious)
+    }
+
+    @Test
+    fun `a last id that comes too late changes nothing`() {
+        feed(press(10), 0)
+        tracker.seed(REMOTE, 3)
+        assertEquals(IdStep.NEXT, feed(press(11), 5_000)?.idStep)
+        // and it is kept per sender
+        tracker.seed(OTHER_REMOTE, 3)
+        assertEquals(IdStep.GAP, feed(press(5), 6_000, OTHER_REMOTE)?.idStep)
     }
 
     @Test
     fun `random streams are fully accounted for`() {
         val random = Random(1127)
+        // without the packets whose buttons could not be read: whether one of them joins a
+        // burst depends on what is open, which the tests above pin down
         val packets = BthomeVectors.all.mapNotNull { it.expected }
+            .filterNot { it.stoppedEarly && it.buttons.all { button -> button == ButtonEvent.NONE } }
         repeat(200) {
             val tracker = ShellyTracker()
             var now = 0L
-            var events = 0
-            var missed = 0
             var inBursts = 0
+            var late = 0
             var plainPackets = 0
             repeat(300) {
                 // mostly close together, sometimes a long pause, sometimes a step back in time
@@ -390,22 +468,19 @@ class ShellyTrackerTest {
                 val update = tracker.onPacket(if (random.nextInt(4) == 0) OTHER_REMOTE else REMOTE, packet, now)
                 if (!packet.encrypted) plainPackets++
                 update.event?.let { event ->
-                    events++
-                    missed += event.missedBefore
+                    assertFalse(update.late)
                     assertEquals(event.idStep == IdStep.GAP, event.missedBefore > 0)
                     assertTrue(event.missedBefore <= ShellyTracker.DEFAULT_MAX_GAP)
                     assertTrue(event.presses.all { it.button in 1..4 })
                 }
+                if (update.late) late++
                 inBursts += update.finished.sumOf { it.packets }
                 assertTrue(update.finished.all { it.spanMs >= 0 && it.packets >= 1 })
             }
             inBursts += tracker.takeFinished(Long.MAX_VALUE).sumOf { it.packets }
             assertTrue(tracker.takeFinished(Long.MAX_VALUE).isEmpty())
-            // every packet belongs to exactly one burst, every burst to exactly one event
-            assertEquals(plainPackets, inBursts)
-            val totals = tracker.totals()
-            assertEquals(events, totals.received + totals.beacons)
-            assertEquals(missed, totals.missed)
+            // every packet belongs to exactly one burst or is a late repeat of a closed one
+            assertEquals(plainPackets, inBursts + late)
         }
     }
 

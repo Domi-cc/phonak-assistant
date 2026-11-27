@@ -62,8 +62,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val app = LaraApp.instance
-        // the one place from which the listener can be started before the app is the assistant
-        ListenerService.start(this, "main_activity")
         // The first run takes the speech engine some seconds; the owner is looking at the
         // screen now, not waiting for a number in the hearing aid.
         app.prompts.warm("main_activity")
@@ -74,6 +72,17 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize()) { MainScreen(lifecycle) }
             }
         }
+    }
+
+    /**
+     * The one place from which the listener can be started before the app is the assistant.
+     * Every time the app comes onto the screen, not only when the activity is created: the
+     * permission the listener needs may have been granted in Android's settings in the
+     * meantime, and nothing tells the app about that. Costs one journal line if it runs.
+     */
+    override fun onStart() {
+        super.onStart()
+        ListenerService.start(this, "main_activity")
     }
 }
 

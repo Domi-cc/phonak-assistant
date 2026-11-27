@@ -10,36 +10,7 @@ import android.os.Looper
 import android.os.SystemClock
 import io.github.domicc.lara.LaraApp
 import io.github.domicc.lara.core.scan.ScanMode
-
-/**
- * What listens for the remote at this moment; attached to every journal line and shown in the
- * setup checklist.
- *
- * @param mode the mode the callback scan asked for; null while there is no callback scan
- * @param passive the scan type that scan really has
- * @param rescue the rescue scan is registered as well
- * @param off why there is no callback scan, if [mode] is null
- */
-data class ScanStatus(
-    val mode: ScanMode? = null,
-    val passive: Boolean = true,
-    val rescue: Boolean = false,
-    val off: String? = SERVICE_NOT_RUNNING,
-) {
-    /** For the journal: `low_power/passive`, `balanced/active+rescue`, `off`. */
-    val word: String
-        get() = (mode?.let { it.word + "/" + if (passive) "passive" else "active" } ?: "off") +
-            if (rescue) "+rescue" else ""
-
-    companion object {
-        const val SERVICE_NOT_RUNNING = "service_not_running"
-        const val NO_SCAN_PERMISSION = "no_scan_permission"
-        const val BLUETOOTH_OFF = "bluetooth_off"
-        const val NOT_ENROLLED = "not_enrolled"
-        const val SCAN_FAILED = "scan_failed"
-        const val WAITING = "waiting_for_start_budget"
-    }
-}
+import io.github.domicc.lara.core.scan.ScanStatus
 
 /**
  * Owns the background scans for the enrolled remote and keeps them equal to what the settings
@@ -48,7 +19,7 @@ data class ScanStatus(
  * reliably notice when that changes later.
  *
  * Two scans with the same filter (the remote's address and the BTHome service data):
- * - the callback scan, which delivers the presses. Its mode follows the audio session. A scan
+ * - the callback scan, which delivers the presses. Its mode follows the count session. A scan
  *   cannot be changed, so a new mode means a new scan; the new one is started before the old
  *   one is stopped.
  * - optionally the rescue scan, which delivers through a broadcast to [RescueScanReceiver] and
@@ -56,7 +27,12 @@ data class ScanStatus(
  *   idle mode. It is deliberately not stopped together with the service.
  *
  * Both are registered anew ([sync] with force) whenever something may have dropped them:
- * Bluetooth coming back, a new process, the periodic alarm.
+ * Bluetooth coming back, a new process, and the periodic alarm if the owner has switched it on.
+ *
+ * A start that has to wait (start budget, retry after a failure) is posted to the main
+ * handler under a timed wake lock for the length of the wait. Without the lock the phone
+ * would sleep through it: a scan left in session mode, or no scan at all, until something
+ * else wakes the phone.
  *
  * Main thread only.
  *
@@ -74,7 +50,7 @@ internal class RemoteScan(
      * One registered callback scan. A new object for every start, because Android refuses a
      * callback object that it still has registered.
      */
-    private inner class Registration(val number: Int, val target: Target) : ScanCallback() {
+    private inner class Registration(val number: Int, val target: Target, val startedAtMs: Long) : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) =
             app.shelly.onScanResult(result, ScanSource.CALLBACK)
 
@@ -104,7 +80,7 @@ internal class RemoteScan(
     private val retry = Runnable { run("retry", force = false) }
 
     /**
-     * Brings the scans in line with the settings, the enrolled remote and the audio session.
+     * Brings the scans in line with the settings, the enrolled remote and the count session.
      *
      * @param reason why this is called, for the journal
      * @param force register anew even if nothing has changed
@@ -117,9 +93,8 @@ internal class RemoteScan(
     /** Stops the callback scan because the service ends. The rescue scan stays. */
     fun stop(reason: String) {
         handler.removeCallbacks(retry)
-        val scanner = BleScans.scanner(context)
         val old = current
-        if (old != null && scanner != null && BleScans.hasPermission(context)) stopCallback(scanner, old, reason)
+        if (old != null && BleScans.scanner(context) != null && BleScans.hasPermission(context)) stopCallback(old, reason)
         current = null
     }
 
@@ -139,7 +114,7 @@ internal class RemoteScan(
         }
         if (remote == null) {
             // nothing to filter on, and a scan without a filter would hear every device around
-            current?.let { stopCallback(scanner, it, reason) }
+            current?.let { stopCallback(it, reason) }
             current = null
             syncRescue(scanner, null, reason, force = false)
             journal.log("scan_skipped", mapOf("reason" to reason, "why" to ScanStatus.NOT_ENROLLED))
@@ -173,11 +148,11 @@ internal class RemoteScan(
         if (waitMs > 0) {
             forceOwed = restart
             journal.log("scan_deferred", mapOf("reason" to reason, "waitMs" to waitMs))
-            handler.postDelayed(retry, waitMs + 100)
+            later(waitMs + 100)
             return false
         }
         forceOwed = false
-        val next = Registration(++started, target)
+        val next = Registration(++started, target, now)
         try {
             scanner.startScan(listOf(BleScans.remoteFilter(target.address)), BleScans.settings(target.mode, target.passive), next)
         } catch (e: Exception) {
@@ -188,7 +163,7 @@ internal class RemoteScan(
         BleScans.starts.record(now)
         current = next
         journal.log("scan_started", startFields(ScanSource.CALLBACK, target, reason) + ("number" to next.number))
-        if (old != null) stopCallback(scanner, old, "replaced")
+        if (old != null) stopCallback(old, "replaced")
         return true
     }
 
@@ -229,19 +204,26 @@ internal class RemoteScan(
         }
     }
 
-    private fun stopCallback(scanner: BluetoothLeScanner, registration: Registration, reason: String) {
-        try {
-            scanner.stopScan(registration)
-            journal.log(
-                "scan_stopped",
-                mapOf("scan" to ScanSource.CALLBACK.word, "reason" to reason, "number" to registration.number),
-            )
-        } catch (e: Exception) {
-            journal.log(
-                "scan_failed",
-                mapOf("scan" to ScanSource.CALLBACK.word, "reason" to reason, "where" to "stop", "exception" to e.toString()),
-            )
+    /**
+     * Stops [registration]; a scan that was started less than a moment ago is stopped a
+     * moment later (see [BleScans.stopWhenRegistered]). `scan_stopped` is journaled when the
+     * stop has really been issued, not when it was decided.
+     */
+    private fun stopCallback(registration: Registration, reason: String) {
+        BleScans.stopWhenRegistered(context, registration, registration.startedAtMs) { failure ->
+            val about = mapOf("scan" to ScanSource.CALLBACK.word, "reason" to reason, "number" to registration.number)
+            if (failure == null) {
+                journal.log("scan_stopped", about + ("ageMs" to SystemClock.elapsedRealtime() - registration.startedAtMs))
+            } else {
+                journal.log("scan_failed", about + mapOf("where" to "stop", "exception" to failure.toString()))
+            }
         }
+    }
+
+    /** Runs [retry] after [delayMs], also if the display is off and nothing else is going on. */
+    private fun later(delayMs: Long) {
+        BleScans.holdAwake(context, delayMs)
+        handler.postDelayed(retry, delayMs)
     }
 
     /** Android reports a failed start a moment after the call, on the callback of that start. */
@@ -265,7 +247,7 @@ internal class RemoteScan(
             journal.log("scan_gave_up", mapOf("failures" to failuresInRow))
             return
         }
-        handler.postDelayed(retry, RETRY_MS * failuresInRow)
+        later(RETRY_MS * failuresInRow)
     }
 
     private fun startFields(source: ScanSource, target: Target, reason: String): Map<String, Any?> = mapOf(
@@ -276,6 +258,8 @@ internal class RemoteScan(
         "filter" to "address+service_data",
         "session" to ListenerService.sessionOpen,
         "importance" to BleScans.importance(),
+        // replacing a scan on a timer changes how Android accounts for it
+        "refreshMinutes" to app.shellyStore.scan.value.refreshMinutes,
     )
 
     /** @param off why there is no callback scan, used only if there is none */
