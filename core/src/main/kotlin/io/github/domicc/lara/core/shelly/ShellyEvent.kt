@@ -2,6 +2,7 @@ package io.github.domicc.lara.core.shelly
 
 import io.github.domicc.lara.core.input.Gesture
 import io.github.domicc.lara.core.input.Input
+import io.github.domicc.lara.core.input.InputPath
 import io.github.domicc.lara.core.input.InputSource
 
 /**
@@ -27,9 +28,24 @@ data class ShellyEvent(
     val missedBefore: Int,
     val elapsedMs: Long,
 ) {
-    /** One input per pressed button, for the router. */
-    fun toInputs(): List<Input> =
-        presses.map { Input(InputSource.SHELLY, elapsedMs, it.button, it.gesture) }
+    /**
+     * True if this event carries the id of the event before it ([IdStep.SAME]): most likely
+     * more repeats of a press that was acted on already, heard after a pause. Whoever acts on
+     * presses must not act on this one again. The price: a remote that restarts and happens to
+     * continue with the very same id loses that one press.
+     */
+    val repeatsPrevious: Boolean get() = idStep == IdStep.SAME
+
+    /**
+     * One input per pressed button, for the router. The loss count goes to the first of them
+     * only, so that two buttons pressed together do not report the same loss twice.
+     *
+     * @param path how the packet reached the app
+     */
+    fun toInputs(path: InputPath): List<Input> =
+        presses.mapIndexed { index, press ->
+            Input(InputSource.SHELLY, elapsedMs, press.button, press.gesture, path, if (index == 0) missedBefore else 0)
+        }
 }
 
 /** @param button 1 to 4: the position of the button object in the packet */
@@ -77,22 +93,7 @@ data class ShellyBurst(val event: ShellyEvent, val packets: Int, val spanMs: Lon
  *
  * @param event non-null if the packet started a new event; null for a repeat
  * @param finished bursts that ended in the meantime; each burst is handed out exactly once
+ * @param late the packet is a repeat of a burst that was closed and handed out already: it was
+ * received in time and delivered late. It is in no burst statistics.
  */
-data class ShellyUpdate(val event: ShellyEvent?, val finished: List<ShellyBurst>)
-
-/**
- * Running totals since the last reset.
- *
- * @param received events with at least one press
- * @param missed events lost according to the packet id (see [ShellyEvent.missedBefore])
- * @param beacons events without a press
- * @param restarts events with [IdStep.RESTART]
- * @param pressesByButton button number to presses received
- */
-data class ShellyTotals(
-    val received: Int = 0,
-    val missed: Int = 0,
-    val beacons: Int = 0,
-    val restarts: Int = 0,
-    val pressesByButton: Map<Int, Int> = emptyMap(),
-)
+data class ShellyUpdate(val event: ShellyEvent?, val finished: List<ShellyBurst>, val late: Boolean = false)

@@ -18,6 +18,7 @@ import android.os.SystemClock
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
+import io.github.domicc.lara.core.journal.JournalNames
 import io.github.domicc.lara.journal.Journal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -33,7 +34,7 @@ import kotlin.math.sqrt
 
 /**
  * One open voice link to the hearing aid: open it, play PCM into it, record from it, close it.
- * Session programs (echo test, count session ...) are built on top of this class.
+ * Session programs (remote session, echo test, count session) are built on top of this class.
  *
  * Why it is built this way (all measured or read from the Android 17 source):
  * - After a hearing-aid tap the app must answer with [BluetoothHeadset.startVoiceRecognition]
@@ -94,11 +95,10 @@ class AudioLink(
     var onInterrupted: ((why: String) -> Unit)? = null
 
     /** Journals `session_<name>` with the time since the trigger. */
-    fun step(name: String, fields: Map<String, Any?> = emptyMap()) {
-        journal.log(
-            "session_$name",
-            fields + mapOf("ms" to SystemClock.elapsedRealtime() - startedAt, "trigger" to trigger),
-        )
+    fun step(name: String, fields: Map<String, Any?> = emptyMap()) = journalStep("session_$name", fields)
+
+    private fun journalStep(type: String, fields: Map<String, Any?>) {
+        journal.log(type, fields + mapOf("ms" to SystemClock.elapsedRealtime() - startedAt, "trigger" to trigger))
     }
 
     /** Opens the link and plays the start tone. Throws [Failed] if the hearing aid cannot be reached. */
@@ -261,9 +261,9 @@ class AudioLink(
         closed = true
         val toHearingAid = linkWasUp && audio.communicationDevice?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
         track?.let { track ->
-            if (result != "cancelled" && toHearingAid) {
+            if (result != JournalNames.RESULT_CANCELLED && toHearingAid) {
                 val tone = when {
-                    result != "ok" -> Tones.error
+                    result != JournalNames.RESULT_OK -> Tones.error
                     farewell != null -> farewell + Tones.silence(120) + Tones.sessionEnd
                     else -> Tones.sessionEnd
                 } + Tones.silence(TAIL_MS)
@@ -273,7 +273,7 @@ class AudioLink(
             track.release()
         }
         // A failure before the link was up must not be audible on the phone itself.
-        if (result != "ok" && result != "cancelled" && !toHearingAid) vibrateFailure()
+        if (result != JournalNames.RESULT_OK && result != JournalNames.RESULT_CANCELLED && !toHearingAid) vibrateFailure(context)
         track = null
         if (routeRequested) audio.clearCommunicationDevice()
         val headset = headset
@@ -284,16 +284,8 @@ class AudioLink(
             null
         }
         focusRequest?.let { audio.abandonAudioFocusRequest(it) }
-        step("end", mapOf("result" to result, "voiceRecognitionStopped" to stopped))
-    }
-
-    private fun vibrateFailure() {
-        runCatching {
-            context.getSystemService(Vibrator::class.java).vibrate(
-                VibrationEffect.createWaveform(longArrayOf(0, 110, 120, 110), -1),
-                VibrationAttributes.createForUsage(VibrationAttributes.USAGE_COMMUNICATION_REQUEST),
-            )
-        }
+        // the type and the result are what the counters on the screen read back
+        journalStep(JournalNames.SESSION_END, mapOf(JournalNames.RESULT to result, "voiceRecognitionStopped" to stopped))
     }
 
     /** Feeds silence (so this app counts as playing) until [condition] holds or time runs out. */
@@ -352,12 +344,26 @@ class AudioLink(
     private fun deviceLabel(device: AudioDeviceInfo?): String? =
         device?.let { "type=${it.type} ${it.productName}" }
 
-    private companion object {
-        const val PROXY_TIMEOUT_MS = 3_000L
-        const val LINK_TIMEOUT_MS = 6_000L
-        const val PRE_ROLL_MS = 300
-        const val TAIL_MS = 500
-        const val WRITE_CHUNK = Tones.SAMPLE_RATE / 10
-        const val SOUND_THRESHOLD = 200
+    companion object {
+        private const val PROXY_TIMEOUT_MS = 3_000L
+        private const val LINK_TIMEOUT_MS = 6_000L
+        private const val PRE_ROLL_MS = 300
+        private const val TAIL_MS = 500
+        private const val WRITE_CHUNK = Tones.SAMPLE_RATE / 10
+        private const val SOUND_THRESHOLD = 200
+
+        /**
+         * The signal for a failure before the link to the hearing aid is up: a short double
+         * vibration. Nothing audible may be played at that point, because it would come out
+         * of whatever Android routes sound to, which is not the hearing aid yet.
+         */
+        fun vibrateFailure(context: Context) {
+            runCatching {
+                context.getSystemService(Vibrator::class.java).vibrate(
+                    VibrationEffect.createWaveform(longArrayOf(0, 110, 120, 110), -1),
+                    VibrationAttributes.createForUsage(VibrationAttributes.USAGE_COMMUNICATION_REQUEST),
+                )
+            }
+        }
     }
 }

@@ -27,9 +27,35 @@ class ScanStartBudgetTest {
 
     @Test
     fun `starts recorded without asking count as well`() {
-        // the scan on the screen starts whenever its owner asks; the listener then has to wait
+        // a scan that needs no permission to start (the rescue scan) still uses up the budget
         for (i in 0 until 6) budget.record(2_000L + i * 100)
         assertEquals(30_000 - 800 + 200, budget.waitMs(2_800), "the fourth newest start decides")
+    }
+
+    @Test
+    fun `sessions in a row never wait for their session mode`() {
+        // The worst case for the default budget: every session is over at once (the hearing
+        // aid is not connected), the scan goes back to idle as soon as the linger allows, and
+        // the next session opens right after that. Two scan starts per session.
+        val default = ScanStartBudget()
+        var now = 0L
+        repeat(20) { session ->
+            assertEquals(0, default.waitMs(now), "session $session has to wait for its scan mode")
+            default.record(now)
+            // back to idle; this start may wait, that only keeps the session mode a little longer
+            now += ScanConfig.SESSION_LINGER_MS
+            now += default.waitMs(now)
+            default.record(now)
+            now += 1
+        }
+    }
+
+    @Test
+    fun `without the linger the third session in a row would wait`() {
+        // what the linger is for: session mode and back for every session, a few seconds apart
+        val default = ScanStartBudget()
+        for (at in listOf(0L, 8_000L, 10_000L, 18_000L)) default.record(at)
+        assertEquals(10_000, default.waitMs(20_000))
     }
 
     @Test

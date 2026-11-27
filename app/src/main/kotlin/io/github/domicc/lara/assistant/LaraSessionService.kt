@@ -5,7 +5,8 @@ import android.os.Bundle
 import android.service.voice.VoiceInteractionSession
 import android.service.voice.VoiceInteractionSessionService
 import io.github.domicc.lara.LaraApp
-import io.github.domicc.lara.audio.SessionService
+import io.github.domicc.lara.audio.SessionPrograms
+import io.github.domicc.lara.core.input.InputSource
 
 /** Required by the assistant role. The assist gesture ends up here. */
 class LaraSessionService : VoiceInteractionSessionService() {
@@ -22,8 +23,11 @@ private class LaraSession(context: Context) : VoiceInteractionSession(context) {
 
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
-        LaraApp.instance.journal.log("assist_gesture", mapOf("showFlags" to showFlags))
-        SessionService.start(context, "assist", null)
+        LaraApp.instance.journal.log(
+            "assist_gesture",
+            mapOf("showFlags" to showFlags, "origin" to InputSource.ASSIST_GESTURE.word),
+        )
+        LaraApp.instance.router.request(InputSource.ASSIST_GESTURE, SessionPrograms.ECHO)
         hide()
     }
 }

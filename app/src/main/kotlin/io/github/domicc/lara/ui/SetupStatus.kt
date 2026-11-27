@@ -6,9 +6,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.PowerManager
+import android.os.SystemClock
 import io.github.domicc.lara.LaraApp
 import io.github.domicc.lara.assistant.LaraVoiceInteractionService
+import io.github.domicc.lara.core.scan.ScanStatus
 import io.github.domicc.lara.journal.DeviceState
+import io.github.domicc.lara.shelly.ListenerService
+import io.github.domicc.lara.speech.PromptCache
 import io.github.domicc.lara.trigger.VoiceCommandActivity
 
 /** One line of the setup checklist. [ok] is null when the state is neither good nor bad. */
@@ -29,6 +33,9 @@ object SetupStatus {
     const val VOICE_BUTTON = "voice_button"
     const val HEARING_AID = "hearing_aid"
     const val BATTERY = "battery"
+    const val SHELLY = "shelly"
+    const val LISTENER = "listener"
+    const val PROMPTS = "prompts"
 
     fun read(context: Context): List<SetupItem> = listOf(
         permissions(context),
@@ -36,6 +43,9 @@ object SetupStatus {
         voiceButton(context),
         hearingAid(),
         battery(context),
+        shelly(),
+        listener(),
+        prompts(),
     )
 
     private fun permissions(context: Context): SetupItem {
@@ -93,5 +103,71 @@ object SetupStatus {
         val exempt = context.getSystemService(PowerManager::class.java)
             .isIgnoringBatteryOptimizations(context.packageName)
         return SetupItem(BATTERY, "Akku-Ausnahme", exempt, if (exempt) "erteilt" else "fehlt")
+    }
+
+    /** Without a remote the app still works by tap, so a missing one is neither good nor bad. */
+    private fun shelly(): SetupItem {
+        val app = LaraApp.instance
+        val remote = app.shellyStore.remote.value
+            ?: return SetupItem(SHELLY, "Shelly-Fernbedienung", null, "nicht angelernt: unten unter „Shelly“ suchen und wählen")
+        val lastPress = app.shelly.lastPressElapsedMs
+        val which = shortAddress(remote.address)
+        return SetupItem(
+            SHELLY, "Shelly-Fernbedienung", true,
+            if (lastPress == null) "$which · seit App-Start kein Druck empfangen"
+            else "$which · letzter Druck vor " + ago(SystemClock.elapsedRealtime() - lastPress),
+        )
+    }
+
+    /** The service counts as fine only while it really scans; without a remote it is neither good nor bad. */
+    private fun listener(): SetupItem {
+        if (!ListenerService.running) return SetupItem(LISTENER, "Lausch-Dienst", false, "läuft nicht")
+        val status = ListenerService.status
+        val mode = status.mode
+        if (mode == null) {
+            val why = when (status.off) {
+                ScanStatus.NOT_ENROLLED -> "Shelly nicht angelernt"
+                ScanStatus.BLUETOOTH_OFF -> "Bluetooth ist aus"
+                ScanStatus.NO_SCAN_PERMISSION -> "Berechtigung fehlt"
+                ScanStatus.WAITING -> "Start folgt in bis zu 30 Sekunden"
+                else -> "Start fehlgeschlagen, siehe Protokoll"
+            }
+            return SetupItem(LISTENER, "Lausch-Dienst", if (status.off == ScanStatus.NOT_ENROLLED) null else false, "läuft · kein Scan: $why")
+        }
+        val detail = buildString {
+            append("läuft · Scan ")
+            append(modeLabel(mode))
+            append(if (status.passive) ", passiv" else ", aktiv")
+            if (ListenerService.sessionOpen) append(" · Sitzung offen")
+            if (status.rescue) append(" · Rettungs-Scan an")
+        }
+        return SetupItem(LISTENER, "Lausch-Dienst", true, detail)
+    }
+
+    /** Missing phrases are no obstacle: sessions then use tones. So this is never plain "bad" while it is being worked on. */
+    private fun prompts(): SetupItem {
+        val status = LaraApp.instance.prompts.status.value
+        val count = "${status.ready} von ${status.total}"
+        return when {
+            status.complete -> SetupItem(PROMPTS, "Ansagen", true, "$count bereit")
+            status.state == PromptCache.State.WARMING -> SetupItem(PROMPTS, "Ansagen", null, "werden erzeugt: $count")
+            status.state == PromptCache.State.FAILED -> {
+                val problem = status.problem.orEmpty()
+                val why = when {
+                    problem.startsWith("engine_init") || problem.startsWith("engine_timeout") ->
+                        "keine Sprachausgabe auf dem Telefon erreichbar"
+                    problem.startsWith("no_german_voice") -> "keine deutsche Stimme installiert"
+                    else -> "Sprachausgabe scheitert, siehe Protokoll"
+                }
+                SetupItem(PROMPTS, "Ansagen", false, "$count bereit, sonst Töne · $why")
+            }
+            else -> SetupItem(PROMPTS, "Ansagen", null, "$count bereit, sonst Töne")
+        }
+    }
+
+    private fun ago(ms: Long): String = when {
+        ms < 60_000 -> "${ms / 1000} s"
+        ms < 3_600_000 -> "${ms / 60_000} min"
+        else -> "${ms / 3_600_000} h ${ms % 3_600_000 / 60_000} min"
     }
 }

@@ -9,13 +9,43 @@ package io.github.domicc.lara.core.input
  * @param button which button, where the source has several: 1 to 4 on the Shelly remote, the
  * Android key code for a media key; null otherwise
  * @param gesture how it was pressed, where the source can tell; null otherwise
+ * @param path which way it took into the app, for a source that has more than one; null otherwise
+ * @param missedBefore how many events of the same source were lost right before this one, as
+ * far as the source can tell (the Shelly remote numbers its packets); 0 otherwise
  */
 data class Input(
     val source: InputSource,
     val elapsedMs: Long,
     val button: Int? = null,
     val gesture: Gesture? = null,
-)
+    val path: InputPath? = null,
+    val missedBefore: Int = 0,
+) {
+    /**
+     * The one word that says where this input came from: `tap`, `ble_callback`, `ble_rescue`,
+     * `screen`, `adb`, `simulated` ... It goes into every journal line the input causes and is
+     * the trigger name of a session it starts.
+     */
+    val origin: String get() = path?.word ?: source.word
+}
+
+/**
+ * The way an input took into the app, where the source alone does not say it. A press of the
+ * Shelly remote can come from either of two Bluetooth scans, or from a test command that only
+ * pretends there was one. Measurements must be able to tell these apart.
+ *
+ * @param word the name used in the journal
+ */
+enum class InputPath(val word: String) {
+    /** The scan of the listener service. */
+    BLE_CALLBACK("ble_callback"),
+
+    /** The scan that delivers through a broadcast, also into a process that was just started. */
+    BLE_RESCUE("ble_rescue"),
+
+    /** No remote was involved: a test command made this input up. */
+    SIMULATED("simulated"),
+}
 
 /**
  * Where an [Input] came from.

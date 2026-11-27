@@ -1,6 +1,7 @@
 package io.github.domicc.lara.shelly
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
@@ -10,7 +11,11 @@ import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelUuid
+import android.os.PowerManager
+import android.os.SystemClock
 import io.github.domicc.lara.core.bthome.BthomePacket
 import io.github.domicc.lara.core.bthome.BthomeParser
 import io.github.domicc.lara.core.scan.ScanMode
@@ -73,6 +78,51 @@ internal object BleScans {
         return builder.build()
     }
 
+    /**
+     * Stops the scan of [callback], but not before it is [MIN_STOP_AGE_MS] old.
+     *
+     * Why (read from the Android 17 source): a scan is registered asynchronously. Until the
+     * registration has come back, stopScan takes the callback off Android's list and returns
+     * without stopping anything. The scan then starts all the same, and the app can no longer
+     * reach it: it runs on in its mode until the process dies or Bluetooth restarts, and the
+     * journal would say it was stopped. That happens when a scan is replaced within a few
+     * milliseconds of its start, for example by a session that fails at once.
+     *
+     * @param startedAtMs when the scan was started, on the elapsed-realtime clock
+     * @param done called on the main thread once the stop has really been issued: with null,
+     * or with the exception that made it fail
+     */
+    @SuppressLint("MissingPermission") // a missing permission ends up in [done] as SecurityException
+    fun stopWhenRegistered(context: Context, callback: ScanCallback, startedAtMs: Long, done: (Exception?) -> Unit) {
+        val stop = Runnable {
+            done(
+                try {
+                    // without Bluetooth there is nothing left to stop
+                    scanner(context)?.stopScan(callback)
+                    null
+                } catch (e: Exception) {
+                    e
+                },
+            )
+        }
+        val waitMs = startedAtMs + MIN_STOP_AGE_MS - SystemClock.elapsedRealtime()
+        if (waitMs <= 0) return stop.run()
+        holdAwake(context, waitMs)
+        main.postDelayed(stop, waitMs)
+    }
+
+    /**
+     * Keeps the phone awake for [ms] and a moment more, for something that is posted to run
+     * then: a handler's clock stands still while the phone sleeps, so without this a retry
+     * "in two seconds" would run whenever something else wakes the phone. Timed; nobody
+     * releases it.
+     */
+    fun holdAwake(context: Context, ms: Long) {
+        context.getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "lara:scan")
+            .acquire(ms + AWAKE_MARGIN_MS)
+    }
+
     /** The scan type a scan with [passive] really gets, for the journal. */
     fun scanTypeWord(passive: Boolean): String = if (passive && scanTypeSelectable) "passive" else "active"
 
@@ -107,4 +157,9 @@ internal object BleScans {
         packet.stoppedEarly -> packet.stop?.name?.lowercase()
         else -> null
     }
+
+    /** By then the registration of a scan has come back; on the phone it takes a few milliseconds. */
+    private const val MIN_STOP_AGE_MS = 1_000L
+    private const val AWAKE_MARGIN_MS = 500L
+    private val main = Handler(Looper.getMainLooper())
 }

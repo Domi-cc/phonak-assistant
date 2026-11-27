@@ -3,4 +3,6 @@
     <string name="app_name">Lara im Ohr</string>
     <string name="channel_session">Sitzung</string>
     <string name="notification_session_title">Lara spricht mit dem Hörgerät</string>
+    <string name="channel_listener">Lausch-Dienst</string>
+    <string name="notification_listener_title">Lara lauscht auf die Fernbedienung</string>
 </resources>

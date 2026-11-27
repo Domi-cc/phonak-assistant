@@ -7,8 +7,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import io.github.domicc.lara.LaraApp
-import io.github.domicc.lara.audio.SessionPrograms
 import io.github.domicc.lara.audio.SessionService
+import io.github.domicc.lara.core.input.InputSource
+import io.github.domicc.lara.core.journal.JournalNames
 
 /**
  * Input path A. Started by Android's Bluetooth stack when the hearing aid (or any hands-free
@@ -25,13 +26,14 @@ class VoiceCommandActivity : Activity() {
         SessionService.holdAwake(this)
         val device = intent?.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
         LaraApp.instance.journal.log(
-            "tap_intent",
+            JournalNames.TAP,
             mapOf(
                 "action" to intent?.action,
                 "hasDevice" to (device != null),
                 "profile" to intent?.getIntExtra(EXTRA_PROFILE, -1),
                 "extras" to intent?.extras?.keySet()?.sorted()?.joinToString(","),
                 "flags" to intent?.flags?.let { "0x" + Integer.toHexString(it) },
+                "origin" to InputSource.HEARING_AID_TAP.word,
             ),
         )
         val app = LaraApp.instance
@@ -39,10 +41,10 @@ class VoiceCommandActivity : Activity() {
             // The voice button of a car kit or another headset: not ours to answer.
             handOver()
         } else {
-            // With a remote enrolled the tap opens the session in which the remote is heard;
-            // without one it runs the echo test.
-            val program = if (app.shelly.remote.value != null) SessionPrograms.REMOTE else SessionPrograms.ECHO
-            SessionService.start(this, "tap", device, program)
+            // The router decides what a tap does. Unless the owner set it otherwise: with a
+            // remote enrolled it opens the session in which the remote is heard, without one
+            // it runs the echo test. A tap during a running session ends that session.
+            app.router.tap(device)
         }
         finish()
     }

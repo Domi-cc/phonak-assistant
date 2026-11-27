@@ -5,14 +5,17 @@ import android.os.SystemClock
 import android.util.Log
 import io.github.domicc.lara.core.journal.JournalCodec
 import io.github.domicc.lara.core.journal.JournalRecord
+import io.github.domicc.lara.core.journal.JournalTail
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.max
 
 /**
  * Persistent event journal: one JSON line per event, one file per day, in app-private storage.
@@ -26,7 +29,7 @@ class Journal(private val context: Context) {
     private val lock = Any()
     private val recentRecords = MutableStateFlow(loadTail())
 
-    /** The newest records, oldest first, for the screen. */
+    /** The newest records, oldest first, for the screen; without the types in [NOT_ON_SCREEN]. */
     val recent: StateFlow<List<JournalRecord>> = recentRecords.asStateFlow()
 
     fun log(type: String, fields: Map<String, Any?> = emptyMap()) {
@@ -42,24 +45,45 @@ class Journal(private val context: Context) {
         Log.i(TAG, line)
         synchronized(lock) {
             try {
-                File(dir, fileName(record.wallMs)).appendText(line + "\n")
+                fileOf(record.wallMs).appendText(line + "\n")
             } catch (e: IOException) {
                 Log.e(TAG, "journal write failed", e)
             }
-            recentRecords.value = (recentRecords.value + record).takeLast(KEEP_IN_MEMORY)
+            if (type !in NOT_ON_SCREEN) recentRecords.value = (recentRecords.value + record).takeLast(KEEP_IN_MEMORY)
         }
     }
 
     /** All journal files, oldest first. */
     fun files(): List<File> = dir.listFiles()?.sortedBy { it.name } ?: emptyList()
 
+    /** The file that takes the lines of the day [wallMs] lies in; it need not exist yet. */
+    fun fileOf(wallMs: Long): File = File(dir, fileName(wallMs))
+
+    /**
+     * The newest records of the newest file. Only its end is read: this runs in every process
+     * start, also the one for a hearing-aid tap, and the file of a day of measurements has
+     * many megabytes. A journal that cannot be read must not stop the app, whatever the reason.
+     */
     private fun loadTail(): List<JournalRecord> = try {
-        files().lastOrNull()
-            ?.readLines()
-            ?.takeLast(KEEP_IN_MEMORY)
-            ?.mapNotNull(JournalCodec::decode)
-            ?: emptyList()
-    } catch (e: IOException) {
+        val file = files().lastOrNull()
+        if (file == null) {
+            emptyList()
+        } else {
+            RandomAccessFile(file, "r").use { reader ->
+                val start = max(0, reader.length() - TAIL_BYTES)
+                reader.seek(start)
+                val end = ByteArray((reader.length() - start).toInt())
+                reader.readFully(end)
+                // Sorted out as text, before decoding: of the lines of a day with the remote
+                // most are its packets, and this runs while a tap waits for its answer.
+                JournalTail.lastLines(end, fromStart = start == 0L, max = Int.MAX_VALUE)
+                    .filterNot { line -> OFF_SCREEN_MARKS.any { it in line } }
+                    .takeLast(KEEP_IN_MEMORY)
+                    .mapNotNull(JournalCodec::decode)
+            }
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "journal not readable", e)
         emptyList()
     }
 
@@ -69,5 +93,18 @@ class Journal(private val context: Context) {
     private companion object {
         const val TAG = "LaraJournal"
         const val KEEP_IN_MEMORY = 300
+
+        /** Lines have a few hundred bytes each, so this holds [KEEP_IN_MEMORY] of them several times over. */
+        const val TAIL_BYTES = 512 * 1024L
+
+        /**
+         * Types that are written to the file and to logcat like every other line, but kept out
+         * of [recent]: they come in dozens per press (one line for every advertisement of the
+         * remote), and a single press would push everything else off the screen.
+         */
+        val NOT_ON_SCREEN = setOf("shelly_packet")
+
+        /** How a line of such a type looks in the file (see [JournalCodec]). */
+        val OFF_SCREEN_MARKS = NOT_ON_SCREEN.map { "\"type\":\"$it\"" }
     }
 }

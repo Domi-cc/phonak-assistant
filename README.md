@@ -50,10 +50,12 @@ This repository is the app that answers them, and the notes on everything we lea
 | ✅ | The app can speak **unprompted** over the media channel, and only if the sound would reach the hearing aid and nothing else. An hourly test alarm fired from deep sleep 48 ms late | 📏 measured |
 | ✅ | **Tap to wake, remote to navigate:** in a session opened by the tap, presses on the pocket remote are received with the phone dark and in Doze, and spoken into the aid ("Taste 1 kurz") | 📏 measured (21 presses, 1 lost) |
 | 🧪 | The same after hours of idle, and with the phone in a pocket | not measured yet |
-| 🔨 | The remote opening a session by itself (listening all day in the background) | built, not on the phone yet |
+| 🔨 | **Remote to wake:** a listener service scans for the remote all day, and a press opens a session by itself and is the first thing announced | built, not measured yet |
+| 🔨 | One router for every trigger; a count session for measurement series; control over adb; day counters and journal sharing on the screen | built, not tried on the phone yet |
 | 🗓 | Spoken menu, Hermes connection, media keys | planned |
 
-<sub>All measurements: 27 November 2026, one device, small samples. Numbers and conditions: <a href="docs/measurements/2026-11-27.md">docs/measurements</a>.</sub>
+<sub>All measurements: 27 November 2026, one device, small samples. Numbers and conditions: <a href="docs/measurements/2026-11-27.md">docs/measurements</a>.
+The ✅ rows were measured with the build of that day. Since then every trigger takes its way through the input router, and inside a session the remote is heard by the listener service's scan instead of a scan of the session's own. The source as it stands now has not run on the phone yet.</sub>
 
 ### The eleven seconds that mattered
 
@@ -105,7 +107,7 @@ flowchart LR
     SESSION -. "planned" .-> HERMES
 ```
 
-<sub>Solid lines work today. Dashed lines are in progress or planned.</sub>
+<sub>Solid lines were measured on the device. Dashed lines are built and not measured yet (the remote) or planned (media keys, Hermes).</sub>
 
 **What happens when you tap your ear:**
 
@@ -194,14 +196,33 @@ you build something similar.
 2. Open **Lara im Ohr** and work down the checklist (the app's texts are German):
    - *Berechtigungen*: allow microphone, nearby devices and notifications.
    - *Assistentenrolle*: choose the app as digital assistant.
-   - *Hörgerät*: pick which connected device is your hearing aid.
-   - optional, *Shelly-Fernbedienung anlernen*: press a button on the remote and pick it.
+   - *Hörgerät*: pick which connected device is your hearing aid (*Wählen*).
+   - optional, the remote: open *Shelly: Suchen und Live-Test*, start the scan, press a button on
+     the remote and pick the line on which that press shows up (*Anlernen*).
 3. With the phone **unlocked**, do the assistant gesture on the hearing aid once. Android shows a
    chooser: pick **Lara im Ohr** and **Always**.
 4. Lock the phone, let the display go dark, and tap again.
 
 Android drops the *Always* choice silently whenever another app that handles the same intent is
 installed. The checklist line *Hörgeräte-Sprachtaste* shows who currently gets the tap.
+
+### What starts what
+
+| Trigger | What it starts |
+|---|---|
+| Double tap on the hearing aid | the **remote session** if a remote is enrolled, the **echo test** if not. The setting *Hörgeräte-Tap startet* can change that to the echo test or the count session |
+| A press on the remote, no session open | a **remote session**, and the press is the first one announced. Only while *Shelly weckt auf* is on (the default); off is the silent mode for measuring reception over hours. Never during a phone call: the phone vibrates instead |
+| A press on the remote during a session | goes to that session |
+| A tap during a session | ends it |
+| Buttons on the screen, [adb](docs/adb-control.md) | any of the three: remote session, echo test, count session |
+
+The **remote session** announces every press in words. The **count session** answers every
+press with its running number instead ("eins", "zwei" …); it is a tool for measurement series
+and never starts by itself. Every session ends after 30 s without a press, on a long press of
+button 4 or on a tap on the hearing aid, and none lasts longer than five minutes. In the remote
+session a press is announced and nothing more: a press can open that session from a pocket,
+so it must never start a recording. The echo test runs inside a session when the screen or
+adb asks for it, and in the count session also on button 3.
 
 ### What you hear
 
@@ -211,22 +232,34 @@ installed. The checklist line *Hörgeräte-Sprachtaste* shows who currently gets
 | One higher tone | speak now |
 | One lower tone | recording finished |
 | *your own voice* | the echo test plays back what the hearing-aid microphone recorded |
-| "Taste 1 kurz" | a press on the remote arrived: button and gesture, spoken (a tone per button if the phrase is not ready yet) |
-| "einer fehlt" | the remote's packet counter shows that a press was lost before this one |
+| "Taste 1 kurz" | a press on the remote arrived: button and gesture, spoken (a tone per button if the phrase is not ready yet). Also for the press that opened the session |
+| "einer fehlt", "mehrere fehlen" | the remote's packet counter shows that something was lost inside the session before this press |
+| "eins", "zwei", "drei" … | count session only: the running number of the press (ticks if the numbers are not ready yet); "drei fehlen" for a gap |
 | "Beende" | the session ends normally |
 | Two falling tones | the session closed normally |
 | Two low buzzes | something went wrong (in the hearing aid) |
-| A short double vibration | something went wrong before the link to the hearing aid was up |
-| One soft tone, then speech | an unprompted announcement |
+| A short double vibration | something went wrong before the link to the hearing aid was up, Android did not let the session start, a press came during a phone call, or a tap met a session that was still closing |
+| One soft tone, then speech | an unprompted announcement. Also "Beende" after you ended a session with a tap: the hearing aid has closed the voice link by then |
 
 ### The journal
 
-Every event is written to a journal with three clocks, screen and lock state, Doze state, battery
-and whether the assistant binding is alive. It is on the app's screen and in logcat:
+Every event is written to a journal with three clocks, screen and lock state, Doze state, battery,
+the scan that is running and whether the assistant binding is alive. It is on the app's screen
+and in logcat:
 
 ```bash
 adb logcat -s LaraJournal
 ```
+
+The screen leaves out one kind of line, `shelly_packet` (one per advertisement of the remote, a
+dozen or more per press); the files and logcat have them. *Heute teilen* and *Alle teilen* hand
+the journal files to Android's share sheet. That is the only way the journal leaves the phone,
+and it contains Bluetooth addresses and device names. *Zähler heute* counts presses, gaps, taps
+and sessions from today's file, and a line typed into *Marker fürs Protokoll* becomes a journal
+line of its own.
+
+For repeatable series the app can be driven from a computer: start a session, change a scan
+setting, write a marker, simulate a press. See [`docs/adb-control.md`](docs/adb-control.md).
 
 ## Build from source
 
@@ -248,16 +281,20 @@ compileSdk 37.2, minSdk 36, targetSdk 36 (switch with `-Plara.targetSdk=37`).
 
 | Path | What |
 |---|---|
-| `core/` | pure Kotlin, no Android imports: journal format, BTHome parser, press tracking with loss counting; 93 JVM tests |
+| `core/` | pure Kotlin, no Android imports: journal format, BTHome parser, press tracking with loss counting, routing decisions, count logic, adb parameters; 216 JVM tests |
 | `app/…/trigger` | the invisible activity that receives the hearing-aid tap |
 | `app/…/assistant` | the three services that make the app a digital assistant |
-| `app/…/audio` | the voice link to the hearing aid, the session service, the echo test |
-| `app/…/shelly` | the remote: search, live test, reception during a session, spoken presses |
+| `app/…/input` | the router that turns every trigger into an action, and the tap setting |
+| `app/…/audio` | the voice link to the hearing aid, the session service, the echo test, the count session |
+| `app/…/shelly` | the remote: the listener service and its scans, the intake of its packets, search and live test, the remote session with spoken presses |
 | `app/…/speech` | spoken phrases, synthesised once and cached as audio for the voice link |
 | `app/…/announce` | unprompted announcements and the hourly test |
+| `app/…/control` | the receiver for commands over adb |
+| `app/…/journal`, `app/…/ui` | journal, day counters, sharing; the one screen with its sections |
 | `docs/design/` | the design document for this version (German) |
 | `docs/measurements/` | what was measured on the device, with conditions |
 | `docs/research/` | the research and verification reports behind the design |
+| `docs/adb-control.md` | the commands for driving the app from a computer |
 | `CLAUDE.md` | hand-over notes for continuing the work in an AI coding session |
 
 <details>
@@ -285,6 +322,9 @@ adb shell cmd audio set-hardening throw
 
 # Is the display really off, and who woke it?
 adb shell dumpsys power | grep -E 'mWakefulness=|Waking up'
+
+# Ask the app itself: settings, scan, listener, session, prompts (more in docs/adb-control.md)
+adb shell am broadcast -n io.github.domicc.lara/.control.AdbReceiver -a lara.STATUS
 ```
 
 Wireless debugging is worth setting up early: a phone on a USB cable never reaches deep sleep, so
@@ -397,8 +437,9 @@ The streaming projects in this group use ASHA or LE Audio. The hearing aid used 
 - [x] Assistant role, hearing-aid tap, voice link, echo test
 - [x] Unprompted announcements, hourly test
 - [x] Pocket remote: BTHome parsing, search and live test, spoken presses inside a session
-- [ ] Pocket remote: listening in the background, so that a press can open a session
-- [ ] Measurements: after hours of idle, in the pocket, per scan mode
+- [x] Pocket remote: listening in the background, so that a press can open a session (built, not measured yet)
+- [x] Input router, count session, control over adb, day counters, journal sharing (built, not tried on the phone yet)
+- [ ] Measurements: the remote as wake-up after minutes and hours of idle, in the pocket, per scan mode
 - [ ] Media keys as an extra trigger
 - [ ] Spoken menu: weather, appointments, to-dos
 - [ ] Hermes connection, speech recognition, reminders pushed from the agent

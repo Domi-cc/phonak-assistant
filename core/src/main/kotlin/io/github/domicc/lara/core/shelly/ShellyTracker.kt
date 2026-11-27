@@ -14,13 +14,23 @@ import kotlin.math.min
  *   still "open" for its sender is a repeat; it only adds to the burst statistics.
  * - A burst stays open until no repeat has arrived for [windowMs]. The window slides with every
  *   repeat, so a long burst (held button) stays one event however long it lasts.
- * - Nothing is remembered beyond that window, apart from one last id per sender. A remote that
+ * - Nothing is acted on beyond that window, apart from one last id per sender. A remote that
  *   restarts can legitimately send the same id again, and it must not be swallowed then; it is
  *   reported with [IdStep.SAME] or [IdStep.RESTART] instead.
  * - Several ids can be open per sender at once, because the same packets may reach the app on
  *   two delivery paths (callback scan and rescue scan) with different delays.
+ * - A delivery path can also be late by more than the window (a broadcast into a dozing
+ *   phone). Such a packet still carries the time at which the radio received it, so it is
+ *   recognised as a repeat of a burst that is closed already: same id, received within the
+ *   window of that burst's last packet. It is reported as [ShellyUpdate.late] and starts
+ *   nothing. Without this it would look like a counter restart, be acted on a second time and
+ *   make the next real event look like a loss.
  * - Packets without a press (beacon) are events too, with empty [ShellyEvent.presses]: they use
  *   the same counter, and following them keeps a received beacon from looking like a loss.
+ * - A packet whose buttons could not be read (cut off, or an object this app cannot step over
+ *   in front of them) is no event at all. Taken for a beacon it would open the burst, and the
+ *   press in the next, complete packet of the same burst would be swallowed as its repeat.
+ *   The caller sees [BthomePacket.stop] and journals the raw bytes.
  * - Encrypted packets are ignored here; the caller sees [BthomePacket.encrypted] and journals it.
  *
  * Times are milliseconds on a clock that keeps counting while the phone sleeps. The timestamp
@@ -29,8 +39,9 @@ import kotlin.math.min
  * last packet to collect the burst statistics.
  *
  * All methods may be called from any thread. One small record per sender address is kept for as
- * long as the tracker lives (the last id, for loss counting after hours of silence), so feed it
- * the remotes the app cares about, not every BTHome device in range.
+ * long as the tracker lives (the last id, for loss counting after hours of silence, and the
+ * last few closed bursts), so feed it the remotes the app cares about, not every BTHome device
+ * in range.
  *
  * @param windowMs how long after its last packet an id counts as still the same burst. It must
  * be longer than the longest pause inside one burst as the scan hears it.
@@ -52,17 +63,28 @@ class ShellyTracker(
         var packets = 1
     }
 
+    /** What is kept of a burst that was handed out, to recognise its late repeats. */
+    private class Closed(val key: BurstKey, val lastMs: Long)
+
     private class Remote {
         var lastId: Int? = null
         val open = LinkedHashMap<BurstKey, Burst>()
+        val closed = ArrayDeque<Closed>()
     }
 
     private val remotes = LinkedHashMap<String, Remote>()
-    private var received = 0
-    private var missed = 0
-    private var beacons = 0
-    private var restarts = 0
-    private val pressesByButton = sortedMapOf<Int, Int>()
+
+    /**
+     * Tells the tracker the last packet id the app received from [address] before this process
+     * started. Without it the first event of a new process has nothing to compare with, and
+     * whatever was lost while the process was gone would never be counted. Does nothing once
+     * a packet of that sender has been fed.
+     */
+    @Synchronized
+    fun seed(address: String, lastId: Int) {
+        val remote = remotes.getOrPut(address) { Remote() }
+        if (remote.lastId == null) remote.lastId = lastId and 0xFF
+    }
 
     /** Feeds one received packet of the sender [address]. */
     @Synchronized
@@ -73,6 +95,9 @@ class ShellyTracker(
         val remote = remotes.getOrPut(address) { Remote() }
         val id = packet.packetId
         val key = BurstKey(id, if (id == null) packet.buttons else null)
+        val presses = packet.buttons.mapIndexedNotNull { index, button ->
+            gestureOf(button)?.let { ShellyPress(index + 1, it) }
+        }
         val open = remote.open[key]
         if (open != null) {
             // the two delivery paths are not in order with each other
@@ -80,6 +105,10 @@ class ShellyTracker(
             open.lastMs = max(open.lastMs, elapsedMs)
             open.packets++
             return ShellyUpdate(null, finished)
+        }
+        if (packet.stoppedEarly && presses.isEmpty()) return ShellyUpdate(null, finished)
+        if (remote.closed.any { it.key == key && elapsedMs - it.lastMs < windowMs }) {
+            return ShellyUpdate(null, finished, late = true)
         }
 
         var step = IdStep.UNKNOWN
@@ -98,16 +127,8 @@ class ShellyTracker(
             }
             remote.lastId = id
         }
-        val presses = packet.buttons.mapIndexedNotNull { index, button ->
-            gestureOf(button)?.let { ShellyPress(index + 1, it) }
-        }
         val event = ShellyEvent(address, id, presses, step, missedBefore, elapsedMs)
         remote.open[key] = Burst(event)
-
-        if (presses.isEmpty()) beacons++ else received++
-        for (press in presses) pressesByButton.merge(press.button, 1, Int::plus)
-        missed += missedBefore
-        if (step == IdStep.RESTART) restarts++
         return ShellyUpdate(event, finished)
     }
 
@@ -119,30 +140,19 @@ class ShellyTracker(
     fun takeFinished(elapsedMs: Long): List<ShellyBurst> {
         val finished = ArrayList<ShellyBurst>()
         for (remote in remotes.values) {
-            val bursts = remote.open.values.iterator()
+            val bursts = remote.open.entries.iterator()
             while (bursts.hasNext()) {
-                val burst = bursts.next()
+                val (key, burst) = bursts.next()
                 if (elapsedMs - burst.lastMs >= windowMs) {
                     bursts.remove()
                     finished += ShellyBurst(burst.event, burst.packets, burst.lastMs - burst.firstMs)
+                    remote.closed.addLast(Closed(key, burst.lastMs))
+                    while (remote.closed.size > KEEP_CLOSED) remote.closed.removeFirst()
                 }
             }
         }
         finished.sortBy { it.event.elapsedMs }
         return finished
-    }
-
-    @Synchronized
-    fun totals(): ShellyTotals = ShellyTotals(received, missed, beacons, restarts, pressesByButton.toMap())
-
-    /** Sets the totals back to zero. What the tracker knows about open bursts and last ids stays. */
-    @Synchronized
-    fun resetTotals() {
-        received = 0
-        missed = 0
-        beacons = 0
-        restarts = 0
-        pressesByButton.clear()
     }
 
     private fun gestureOf(button: ButtonEvent): Gesture? = when (button) {
@@ -162,5 +172,8 @@ class ShellyTracker(
         /** The reference parser of BTHome uses the same four seconds. */
         const val DEFAULT_WINDOW_MS = 4_000L
         const val DEFAULT_MAX_GAP = 32
+
+        /** Closed bursts remembered per sender; a late delivery path lags by a few events at most. */
+        private const val KEEP_CLOSED = 16
     }
 }
