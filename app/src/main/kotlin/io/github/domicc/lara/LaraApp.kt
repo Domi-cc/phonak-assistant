@@ -14,6 +14,7 @@ import io.github.domicc.lara.shelly.RemotePhrases
 import io.github.domicc.lara.shelly.ShellyLive
 import io.github.domicc.lara.shelly.ShellyStore
 import io.github.domicc.lara.speech.PromptCache
+import io.github.domicc.lara.speech.SessionPhrases
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -50,7 +51,7 @@ class LaraApp : Application() {
         headset = HeadsetLink(this, journal, hearingAid)
         announcer = Announcer(this, journal, headset)
         prompts = PromptCache(this, journal)
-        prompts.warm(RemotePhrases.all())
+        prompts.warm(RemotePhrases.all() + SessionPhrases.all())
         shelly = ShellyStore(this, journal)
         shellyLive = ShellyLive(this, journal, shelly)
         journal.log(
