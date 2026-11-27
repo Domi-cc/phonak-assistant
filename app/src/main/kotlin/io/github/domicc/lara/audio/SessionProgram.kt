@@ -1,6 +1,6 @@
 package io.github.domicc.lara.audio
 
-import io.github.domicc.lara.shelly.RemoteProgram
+import io.github.domicc.lara.LaraApp
 
 /**
  * What happens inside one open voice link. The service opens the link (start tone included),
@@ -17,12 +17,11 @@ fun interface SessionProgram {
 /** The programs a trigger can start, by name. */
 object SessionPrograms {
     const val ECHO = "echo"
-
-    /** Sounds for the presses of the Shelly remote while the link is open. */
-    const val REMOTE = "remote"
+    const val COUNT = "count"
 
     fun create(name: String?): SessionProgram = when (name) {
-        REMOTE -> RemoteProgram()
+        COUNT -> LaraApp.instance.let { CountProgram(it, it.router, it.announcer) }
+        ECHO -> EchoProgram()
         else -> EchoProgram()
     }
 }

@@ -1,0 +1,78 @@
+package io.github.domicc.lara.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import io.github.domicc.lara.LaraApp
+import io.github.domicc.lara.core.scan.ScanMode
+import io.github.domicc.lara.speech.PromptCache
+
+/** The names the screen uses for the scan modes, the same as in the setup checklist. */
+fun modeLabel(mode: ScanMode): String = when (mode) {
+    ScanMode.LOW_POWER -> "spar"
+    ScanMode.BALANCED -> "mittel"
+    ScanMode.LOW_LATENCY -> "schnell"
+}
+
+/**
+ * The settings a measurement varies. Each change is stored, journaled and applied by the
+ * running listener at once; nothing here needs a restart.
+ */
+@Composable
+fun SettingsSection() {
+    val app = LaraApp.instance
+    val store = app.shellyStore
+    val scan by store.scan.collectAsState()
+    val wakes by store.wakes.collectAsState()
+    val prompts by app.prompts.status.collectAsState()
+
+    ModeRow("Scan ohne Sitzung", "unbegrenzt nur im Sparmodus", scan.idle) { store.setScan(scan.copy(idle = it)) }
+    ModeRow("Scan in der Sitzung", "mittel und schnell verbrauchen das Stunden-Kontingent", scan.session) {
+        store.setScan(scan.copy(session = it))
+    }
+    SwitchRow(
+        "Rettungs-Scan",
+        "zweiter Scan, der die App auch nach ihrem Ende wieder startet",
+        scan.rescue,
+    ) { store.setScan(scan.copy(rescue = it)) }
+    SwitchRow(
+        "Shelly weckt auf",
+        "aus = stiller Modus: Drücke außerhalb einer Sitzung werden nur protokolliert und gezählt",
+        wakes,
+        store::setWakes,
+    )
+    OutlinedButton(
+        enabled = prompts.state != PromptCache.State.WARMING,
+        onClick = { app.prompts.rebuild("screen") },
+        modifier = Modifier.padding(top = 4.dp),
+    ) { Text("Ansagen neu erzeugen") }
+    Text(
+        "Nötig nach einem Wechsel der Stimme in den Android-Einstellungen. Bis die Ansagen fertig sind, spielt die App Töne.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun ModeRow(label: String, detail: String, selected: ScanMode, onSelect: (ScanMode) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ScanMode.entries.forEach { mode ->
+                FilterChip(selected = mode == selected, onClick = { onSelect(mode) }, label = { Text(modeLabel(mode)) })
+            }
+        }
+    }
+}

@@ -2,13 +2,10 @@ package io.github.domicc.lara.trigger
 
 import android.app.Activity
 import android.bluetooth.BluetoothDevice
-import android.content.ComponentName
-import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Bundle
 import io.github.domicc.lara.LaraApp
-import io.github.domicc.lara.audio.SessionPrograms
 import io.github.domicc.lara.audio.SessionService
+import io.github.domicc.lara.core.input.InputSource
 
 /**
  * Input path A. Started by Android's Bluetooth stack when the hearing aid (or any hands-free
@@ -32,47 +29,15 @@ class VoiceCommandActivity : Activity() {
                 "profile" to intent?.getIntExtra(EXTRA_PROFILE, -1),
                 "extras" to intent?.extras?.keySet()?.sorted()?.joinToString(","),
                 "flags" to intent?.flags?.let { "0x" + Integer.toHexString(it) },
+                "origin" to InputSource.HEARING_AID_TAP.word,
             ),
         )
-        val app = LaraApp.instance
-        if (device != null && app.hearingAid.address != null && !app.hearingAid.isSelected(device)) {
-            // The voice button of a car kit or another headset: not ours to answer.
-            handOver()
-        } else {
-            // With a remote enrolled the tap opens the session in which the remote is heard;
-            // without one it runs the echo test.
-            val program = if (app.shelly.remote.value != null) SessionPrograms.REMOTE else SessionPrograms.ECHO
-            SessionService.start(this, "tap", device, program)
-        }
+        // The router decides what a tap does: it opens a count session, or ends a running one.
+        LaraApp.instance.router.tap(device)
         finish()
-    }
-
-    /**
-     * Passes the request on to another app that handles the voice button (the phone's own
-     * assistant), so that selecting this app as "Always" does not take the voice button away
-     * from the car and from other headsets.
-     */
-    private fun handOver() {
-        val journal = LaraApp.instance.journal
-        val others = packageManager
-            .queryIntentActivities(Intent(Intent.ACTION_VOICE_COMMAND), PackageManager.MATCH_DEFAULT_ONLY)
-            .map { it.activityInfo }
-            .filter { it.packageName != packageName }
-        val target = others.firstOrNull { it.packageName == GOOGLE_APP } ?: others.firstOrNull()
-        if (target == null) {
-            journal.log("tap_other_device", mapOf("handedOverTo" to null))
-            return
-        }
-        try {
-            startActivity(Intent(intent).setComponent(ComponentName(target.packageName, target.name)))
-            journal.log("tap_other_device", mapOf("handedOverTo" to target.packageName))
-        } catch (e: Exception) {
-            journal.log("tap_other_device", mapOf("handedOverTo" to null, "exception" to e.toString()))
-        }
     }
 
     private companion object {
         const val EXTRA_PROFILE = "android.bluetooth.profile.extra.PROFILE"
-        const val GOOGLE_APP = "com.google.android.googlequicksearchbox"
     }
 }

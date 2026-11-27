@@ -5,14 +5,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.bluetooth.BluetoothDevice
-import android.annotation.SuppressLint
 import android.bluetooth.BluetoothHeadset
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
-import android.media.AudioManager
 import android.os.IBinder
 import android.os.PowerManager
 import io.github.domicc.lara.LaraApp
@@ -24,7 +22,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Foreground service (type microphone) that runs one audio session with the hearing aid and
@@ -97,15 +94,10 @@ class SessionService : Service() {
         val program = SessionPrograms.create(intent?.getStringExtra(EXTRA_PROGRAM))
         session = scope.launch {
             val link = AudioLink(this@SessionService, app.journal, app.headset, trigger, device)
-            link.onInterrupted = { why ->
-                app.journal.log("session_interrupted", mapOf("why" to why))
-                session?.cancel()
-            }
             var result = "error"
             try {
-                markOpen(this@SessionService, true)
                 link.open()
-                result = withTimeoutOrNull(MAX_SESSION_MS) { program.run(link) } ?: "max_duration"
+                result = program.run(link)
             } catch (e: AudioLink.Failed) {
                 result = e.reason
             } catch (e: CancellationException) {
@@ -115,7 +107,6 @@ class SessionService : Service() {
                 link.step("error", mapOf("exception" to e.toString()))
             } finally {
                 link.close(result)
-                markOpen(this@SessionService, false)
                 wakeLock?.let { if (it.isHeld) it.release() }
                 wakeLock = null
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -159,11 +150,7 @@ class SessionService : Service() {
         var busyHandler: ((trigger: String) -> Unit)? = null
         private const val CHANNEL_ID = "session"
         private const val NOTIFICATION_ID = 1
-        /** No session may last longer than this, whatever its program does. */
-        private const val MAX_SESSION_MS = 5 * 60_000L
-        private const val SESSION_WAKE_MS = MAX_SESSION_MS + 30_000L
-        private const val PREFERENCES = "session"
-        private const val KEY_OPEN = "open"
+        private const val SESSION_WAKE_MS = 60_000L
         private const val HANDOVER_WAKE_MS = 10_000L
         private const val ACTION_STOP_VOICE_COMMAND = "android.intent.action.STOP_VOICE_COMMAND"
         private const val BluetoothProfile_EXTRA_STATE = "android.bluetooth.profile.extra.STATE"
@@ -176,29 +163,6 @@ class SessionService : Service() {
             context.getSystemService(PowerManager::class.java)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "lara:handover")
                 .acquire(HANDOVER_WAKE_MS)
-        }
-
-        /** Remembers across a process death that a voice link may be open. */
-        private fun markOpen(context: Context, open: Boolean) {
-            context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).edit().putBoolean(KEY_OPEN, open).commit()
-        }
-
-        /**
-         * Call once at process start. If the previous process died in the middle of a session,
-         * nobody closed the voice link: the Bluetooth stack does not notice that the app is
-         * gone, the hearing aid stays in "call" mode and the next tap is refused. Close it now.
-         */
-        @SuppressLint("MissingPermission")
-        suspend fun recoverAfterCrash(app: LaraApp) {
-            val preferences = app.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
-            if (!preferences.getBoolean(KEY_OPEN, false)) return
-            val headset = app.headset.await(5_000)
-            val stopped = headset?.connectedDevices?.map { device ->
-                runCatching { headset.stopVoiceRecognition(device) }.getOrDefault(false)
-            }
-            app.getSystemService(AudioManager::class.java).clearCommunicationDevice()
-            preferences.edit().putBoolean(KEY_OPEN, false).apply()
-            app.journal.log("session_recovered_after_crash", mapOf("voiceRecognitionStopped" to stopped))
         }
 
         /**

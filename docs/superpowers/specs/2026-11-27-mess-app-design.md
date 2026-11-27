@@ -1,29 +1,7 @@
 # Lara im Ohr – Mess-App (Version 0.1): Design
 
-**Stand:** 27. November 2026 · **Status:** vom Auftraggeber am 27.11.2026 zum Bauen freigegeben; wird mit den Messungen fortgeschrieben
+**Stand:** 27. November 2026 · **Status:** Entwurf, wartet auf Freigabe
 **Vorgänger:** Projekt-Summary vom 17.11.2026 (außerhalb des Repos). Wo dieses Dokument dem Summary widerspricht, gilt dieses Dokument.
-
-## Nachtrag: Stand nach dem ersten Gerätetest (27.11.2026, abends)
-
-Die erste Ausbaustufe läuft auf dem Telefon. Dieser Abschnitt hält fest, was dabei herauskam. Wo er dem Rest des Dokuments widerspricht, gilt der Nachtrag.
-
-**Am Gerät belegt**
-
-- Die per ADB installierte App lässt sich als digitaler Assistent wählen und behält die Rolle über Updates mit demselben Signaturschlüssel.
-- Ein Doppeltipp auf das Hörgerät startet die App bei gesperrtem Telefon mit ausgeschaltetem Display. Das Display bleibt aus.
-- Die Sprachverbindung steht nach 0,6 bis 0,8 s. Die Aufnahme kommt vom Hörgeräte-Mikrofon und ist nicht stummgeschaltet. Die Wiedergabe landet im Hörgerät.
-- Eine Ansage ohne Auslöser über den Musik-Kanal funktioniert (bisher bei eingeschaltetem Display geprüft).
-
-**Noch nicht belegt:** dasselbe nach Stunden Ruhe und in der Hosentasche; die Stundenansage aus dem Tiefschlaf; alles rund um den Shelly.
-
-**Was sich gegenüber diesem Dokument geändert hat**
-
-- *Audio-Sitzung (6.5):* Es gibt nur noch einen Weg. Die App antwortet mit `startVoiceRecognition` und wartet, bis die Verbindung steht. Sie fordert die Audio-Route in dieser Betriebsart **nicht** zusätzlich selbst an: Das führte dazu, dass Android die Verbindung als „virtuellen Anruf" öffnen wollte und die Sprachsitzung dabei abbrach (im ersten Build scheiterte deshalb einer von drei Taps). Die Verbindung bleibt nur bestehen, solange die App etwas abspielt; deshalb läuft durchgehend eine eigene Tonspur mit. Der „virtuelle Anruf" ist nur noch der Ersatzweg, falls das Hörgerät die Sprachsitzung ablehnt.
-- *Hörgerät festlegen (neu):* Der Besitzer wählt einmal aus, welches Bluetooth-Gerät das Hörgerät ist. Töne, Ansagen und Sitzungen gehen ausschließlich an dieses Gerät, nie an Auto, anderes Headset oder Telefonlautsprecher. Die Sprachtaste anderer Geräte reicht die App an den bisherigen Assistenten weiter. Fehler vor dem Aufbau der Verbindung werden per Vibration gemeldet, nicht per Ton.
-- *Ansagen ohne Auslöser (neu):* Über den Musik-Kanal, ausgelöst per Wecker. Als Test gibt es eine abschaltbare Ansage der Uhrzeit zu jeder vollen Stunde. Sie liefert nebenbei stündlich einen Messpunkt nach langer Ruhe.
-- *Absicherung der Sitzung (neu):* Obergrenze von fünf Minuten je Sitzung, Abbruch bei Verlust des Audio-Fokus (Anruf, Wecker), Aufräumen einer offen gebliebenen Verbindung nach einem Absturz.
-- *Shelly-Messung (6.4 B, 7):* Verpasste Drücke werden über die fortlaufende Paketnummer des Shelly gezählt, nicht durch Mitzählen. Der Scan wird nur während einer offenen Sitzung hochgefahren. Für lange Reihen gibt es einen stillen Modus, der nur mitschreibt.
-- *Scan-Drossel (3):* Am Telefon ist sie als Einstellung gesetzt. Ob und wie stark sie wirkt, ist noch nicht gemessen.
 
 ## 1. Worum es geht
 
@@ -84,13 +62,13 @@ Bisher ist keine Ende-zu-Ende-Funktion nachgewiesen. Ob Android das überhaupt z
 | Referenz Google-App | öffnet die Sprachverbindung über `BluetoothHeadset.startVoiceRecognition`; Verbindung steht nach 0,4 bis 0,7 s in Breitband-Qualität (16 kHz); im Sperrzustand bricht Google nach etwa 5 s von selbst ab |
 | Sprachtasten-Standard | Bewerber: Google-App und Home Assistant; ohne festen Standard geht der Tap im Sperrzustand ins Leere |
 | Assistentenrolle | hält die Google-App |
-| Scan-Drossel | als Einstellung gesetzt (`scan_allowance_throttling_enabled=true`); ob sie wirkt, ist noch nicht gemessen |
+| Scan-Drossel | **aktiv**: `scan_allowance_throttling_enabled=true` |
 | Medientasten-Recht | `SET_MEDIA_KEY_LISTENER` ist per ADB erteilbar; der Platz war frei |
 | Audio-Härtung | aktiv; das System protokolliert Verstöße unter `dumpsys audio` |
 
 **Aus dem Android-17-Quellcode gelesen und gegengeprüft, am Gerät noch zu bestätigen**
 
-- Löst ein Shelly-Paket oder ein Wecker eine Sitzung aus, gibt es das Mikrofon nur, solange das System den `VoiceInteractionService` der App gebunden hält. Das ist bei der als Assistent gewählten App der Fall, nach dem ersten Entsperren. Die Akku-Ausnahme allein reicht fürs Mikrofon nicht. Der Phonak-Tap bringt laut Quellcode ein eigenes Zeitfenster von 10 s mit. Sprachausgabe braucht bei `targetSdk` 36 nur einen laufenden Vordergrunddienst.
+- Mikrofon und Sprachausgabe aus dem Hintergrund bekommt nur die App, deren `VoiceInteractionService` das System gerade gebunden hält. Das ist die als Assistent gewählte App, nach dem ersten Entsperren. Die Akku-Ausnahme allein reicht dafür nicht.
 - Die Rolle wird bei jeder Paketänderung neu geprüft. Fehlt in einem Build einer der drei Dienste (Interaktion, Sitzung, Erkennung), fliegt die App still aus der Rolle und Google rückt nach.
 - Scan-Drossel: Ausgenommen ist nur eine App mit sichtbarer Oberfläche. Für alle anderen gilt pro Stunde ein Kontingent von 6 Minuten im schnellsten Scan-Modus oder 24 Minuten im mittleren. Danach bleibt bei dunklem Display nur der Sparmodus (0,5 s Lauschen alle 10 s). Dieses Shelly-Modell sendet laut Änderungsprotokoll des Herstellers pro Geste etwa eine Sekunde lang. Das trifft der Sparmodus rechnerisch in etwa 15 % der Fälle.
 - Scan-Zeiten, Drossel und Zeitlimits lassen sich per ADB nicht verstellen.
@@ -343,10 +321,10 @@ Auf Englisch, damit andere Hörgeräteträger etwas davon haben. Inhalt:
 - Recherche-Berichte und Geräte-Mitschnitte bleiben lokal unter `.local/` und sind von Git ausgeschlossen. Ins Repo kommt nur die kuratierte Liste in der README.
 - Tastenbelegung und Auslöser der Mess-App aus Abschnitt 6.4.
 
-**Freigaben**
+**Braucht bei der Umsetzung noch ein ausdrückliches Ja**
 
-- Commit und Push ins öffentliche Repo: am 27.11.2026 freigegeben.
-- Noch offen: Signaturschlüssel als Secret im GitHub-Repo ablegen und das erste Release bauen lassen.
+- Signaturschlüssel erzeugen und als Secret im GitHub-Repo ablegen.
+- Erster Commit, Push und erstes Release im öffentlichen Repo.
 
 ## 13. Der Umsetzung überlassen
 
@@ -366,4 +344,4 @@ Beides bekommt ein eigenes Design, sobald die Messungen ausgewertet sind.
 
 ## Quellen
 
-Die ausführlichen Recherche- und Prüfberichte (20 Dateien) liegen lokal unter `.local/research/`, die Mitschnitte vom Gerät unter `.local/recon/`. Beide Ordner sind nicht Teil des Repos.
+Die ausführlichen Recherche- und Prüfberichte (19 Dateien) liegen lokal unter `.local/research/`, die Mitschnitte vom Gerät unter `.local/recon/`. Beide Ordner sind nicht Teil des Repos.

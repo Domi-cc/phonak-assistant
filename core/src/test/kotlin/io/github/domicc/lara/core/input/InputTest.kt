@@ -15,6 +15,16 @@ class InputTest {
     }
 
     @Test
+    fun `the origin is the path where there is one and the source otherwise`() {
+        assertEquals("tap", Input(InputSource.HEARING_AID_TAP, 1).origin)
+        assertEquals("screen", Input(InputSource.SCREEN, 1).origin)
+        assertEquals("adb", Input(InputSource.ADB, 1).origin)
+        assertEquals("ble_callback", Input(InputSource.SHELLY, 1, button = 1, path = InputPath.BLE_CALLBACK).origin)
+        assertEquals("ble_rescue", Input(InputSource.SHELLY, 1, button = 1, path = InputPath.BLE_RESCUE).origin)
+        assertEquals("simulated", Input(InputSource.SHELLY, 1, button = 1, path = InputPath.SIMULATED).origin)
+    }
+
+    @Test
     fun `the journal words of the sources are fixed`() {
         // journals written by earlier versions use these words; changing one breaks their analysis
         assertEquals(

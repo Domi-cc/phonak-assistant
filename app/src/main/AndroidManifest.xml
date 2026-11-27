@@ -16,8 +16,6 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <!-- For announcements at a set time (hourly test, later reminders). Granted at install. -->
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <!-- Development permission. Has no effect until the owner runs:
          adb shell pm grant io.github.domicc.lara android.permission.SET_MEDIA_KEY_LISTENER -->
     <uses-permission
@@ -33,19 +31,29 @@
         <intent>
             <action android:name="android.intent.action.VOICE_COMMAND" />
         </intent>
+        <!-- The phone's speech engine writes the spoken prompts into files. Without this entry
+             the app cannot see that an engine is installed. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <!-- The Bluetooth stack is updated apart from the system. Its version goes into the
+             journal; these entries make sure the app may look it up. -->
+        <package android:name="com.google.android.bt" />
+        <package android:name="com.android.bt" />
     </queries>
 
     <application
         android:name=".LaraApp"
         android:allowBackup="false"
-        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        tools:ignore="MissingApplicationIcon">
 
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -105,16 +113,57 @@
                 android:resource="@xml/recognition_service" />
         </service>
 
-        <!-- Alarm target for the hourly test announcement. -->
-        <receiver
-            android:name=".announce.HourlyReceiver"
-            android:exported="false" />
-
         <!-- One spoken interaction with the hearing aid. Runs only while a session is active. -->
         <service
             android:name=".audio.SessionService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Input path B: the Shelly remote. Runs all the time and owns the Bluetooth scan.
+             Android rates an app with a foreground service as foreground for scanning. -->
+        <service
+            android:name=".shelly.ListenerService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <!-- Starts the listener after boot (sent after the first unlock: the app is not
+             direct-boot aware) and after an update, and takes its periodic alarm. Not exported:
+             Android itself may still deliver to it. -->
+        <receiver
+            android:name=".shelly.ListenerStarter"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Target of the optional rescue scan. Must be declared here and not registered at
+             run time: the Bluetooth stack delivers to it when the app's process is gone. -->
+        <receiver
+            android:name=".shelly.RescueScanReceiver"
+            android:exported="false" />
+
+        <!-- Control from a computer for repeatable measurements, see docs/adb-control.md.
+             Exported, because the adb shell is another app to Android. The permission is what
+             keeps everybody else out: the shell holds DUMP, an ordinary app cannot get it. No
+             intent filter: commands name this component. -->
+        <receiver
+            android:name=".control.AdbReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
+        <!-- Lets the app chosen in the share sheet read the journal files the owner shares, and
+             nothing else: res/xml/shared_files.xml names the one directory. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/shared_files" />
+        </provider>
 
     </application>
 </manifest>

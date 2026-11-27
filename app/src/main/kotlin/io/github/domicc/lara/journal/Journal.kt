@@ -42,7 +42,7 @@ class Journal(private val context: Context) {
         Log.i(TAG, line)
         synchronized(lock) {
             try {
-                File(dir, fileName(record.wallMs)).appendText(line + "\n")
+                fileOf(record.wallMs).appendText(line + "\n")
             } catch (e: IOException) {
                 Log.e(TAG, "journal write failed", e)
             }
@@ -52,6 +52,9 @@ class Journal(private val context: Context) {
 
     /** All journal files, oldest first. */
     fun files(): List<File> = dir.listFiles()?.sortedBy { it.name } ?: emptyList()
+
+    /** The file that takes the lines of the day [wallMs] lies in; it need not exist yet. */
+    fun fileOf(wallMs: Long): File = File(dir, fileName(wallMs))
 
     private fun loadTail(): List<JournalRecord> = try {
         files().lastOrNull()

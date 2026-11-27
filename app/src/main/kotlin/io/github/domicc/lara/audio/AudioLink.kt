@@ -15,9 +15,6 @@ import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.os.VibrationAttributes
-import android.os.VibrationEffect
-import android.os.Vibrator
 import io.github.domicc.lara.journal.Journal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -38,13 +35,10 @@ import kotlin.math.sqrt
  * Why it is built this way (all measured or read from the Android 17 source):
  * - After a hearing-aid tap the app must answer with [BluetoothHeadset.startVoiceRecognition]
  *   within 5 s, otherwise the aid gets an error.
- * - The link only stays up while a stream is active on it (measured: it drops within tens of
- *   milliseconds once none is, and for a self-requested route Android allows about 6 s). The
- *   app therefore keeps its own [AudioTrack] running for the whole session; callers must not
- *   leave gaps: use [silence] between sounds.
- * - Only the hearing aid the owner selected is ever used ([HearingAidStore]): not a car kit, not
- *   another headset, not the phone. Nothing audible is played before the link to it is up; a
- *   failure before that is signalled by vibration.
+ * - Android drops a communication route about 6 s after the requesting app is neither playing
+ *   nor recording. The app therefore registers for the route itself as well (but only once the
+ *   link is up, see [open]) and keeps its own [AudioTrack] running; callers must not leave
+ *   gaps: use [silence] between sounds.
  * - A recording only counts if Android reports the hearing aid as the device actually used and
  *   the capture was not silenced. There is no fallback to the phone microphone.
  * - [close] must run on every exit path; a link left open makes Android reject the next tap.
@@ -81,17 +75,7 @@ class AudioLink(
     private var focusRequest: AudioFocusRequest? = null
     private var closed = false
 
-    /** Only then may this app make a sound: before, the track is not routed to the hearing aid. */
-    private var linkWasUp = false
-
     val isOpen: Boolean get() = track != null && !closed
-
-    /**
-     * Called (on the main thread) when another app takes audio focus away for good or for a
-     * while: a phone call, an alarm, a navigation prompt. The session must end then.
-     */
-    @Volatile
-    var onInterrupted: ((why: String) -> Unit)? = null
 
     /** Journals `session_<name>` with the time since the trigger. */
     fun step(name: String, fields: Map<String, Any?> = emptyMap()) {
@@ -106,11 +90,7 @@ class AudioLink(
     suspend fun open() = withContext(Dispatchers.IO) {
         val headset = headsetLink.await(PROXY_TIMEOUT_MS) ?: throw Failed("no_hfp_proxy")
         this@AudioLink.headset = headset
-        if (headsetLink.store.address == null) throw Failed("no_hearing_aid_selected")
-        if (preferredDevice != null && !headsetLink.store.isSelected(preferredDevice)) {
-            throw Failed("trigger_from_other_device")
-        }
-        val device = headsetLink.hearingAid(headset) ?: throw Failed("hearing_aid_not_connected")
+        val device = headsetLink.pick(headset, preferredDevice) ?: throw Failed("no_hearing_aid_connected")
         this@AudioLink.device = device
         step(
             "start",
@@ -130,12 +110,7 @@ class AudioLink(
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
             .setAudioAttributes(voiceAttributes)
             .setOnAudioFocusChangeListener(
-                { change ->
-                    journal.log("focus_change", mapOf("change" to change))
-                    if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-                        onInterrupted?.invoke("audio_focus_lost")
-                    }
-                },
+                { change -> journal.log("focus_change", mapOf("change" to change)) },
                 Handler(Looper.getMainLooper()),
             )
             .build()
@@ -144,42 +119,40 @@ class AudioLink(
         val track = newTrack().also { it.play() }
         this@AudioLink.track = track
 
-        // 2. Voice-recognition session: the Bluetooth stack owns the route, and the link stays up
-        //    for as long as some stream is active on it; our track (already playing) is that
-        //    stream. Do NOT also call setCommunicationDevice here: the audio server would then
-        //    try to open the link as a "virtual call", and the Bluetooth stack reacts by ending
-        //    the voice-recognition session (seen on the Pixel: "voice recognition is still
-        //    active, just called stopVoiceRecognition"). The hearing aid then no longer knows a
-        //    session is running, and a second tap cannot end it.
-        var focusGranted = focusResult == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        // 2. Wait for that link BEFORE asking for the route ourselves. Asking earlier makes the
+        //    audio server open the link as a "virtual call", which cancels the voice-recognition
+        //    session again (seen on the Pixel: "isScoAcceptable: rejected SCO"), and the link
+        //    then never comes up.
         if (voiceRecognitionStarted) {
             val audioUp = waitUntil(track) { headset.isAudioConnected(device) }
-            step(if (audioUp) "hfp_audio_up" else "hfp_audio_timeout", mapOf("focusGranted" to focusGranted))
+            step(if (audioUp) "hfp_audio_up" else "hfp_audio_timeout")
             if (!audioUp) throw Failed("link_timeout")
-        } else {
-            // 3. The hearing aid refused voice recognition: open the link as a virtual call by
-            //    asking for the route ourselves. Then Android keeps it only while this app plays
-            //    or records (about 6 s of grace).
-            val sco = audio.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
-            routeRequested = sco != null && audio.setCommunicationDevice(sco)
-            step(
-                "route_requested",
-                mapOf("focusGranted" to focusGranted, "hearingAidListed" to (sco != null), "accepted" to routeRequested),
-            )
         }
+
+        // 3. Now register this app as a user of the route, so that Android keeps it for as long
+        //    as this app plays or records. If the hearing aid refused voice recognition, this
+        //    call is what opens the link (as a virtual call).
+        val sco = audio.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+        routeRequested = sco != null && audio.setCommunicationDevice(sco)
+        step(
+            "route_requested",
+            mapOf(
+                "focusGranted" to (focusResult == AudioManager.AUDIOFOCUS_REQUEST_GRANTED),
+                "hearingAidListed" to (sco != null),
+                "accepted" to routeRequested,
+            ),
+        )
         val linkUp = waitUntil(track) {
             audio.communicationDevice?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO && headset.isAudioConnected(device)
         }
         step(
             if (linkUp) "link_up" else "link_timeout",
             mapOf(
-                "method" to if (voiceRecognitionStarted) "voice_recognition" else "virtual_call",
                 "route" to deviceLabel(audio.communicationDevice),
                 "hfpAudioConnected" to headset.isAudioConnected(device),
             ),
         )
         if (!linkUp) throw Failed("link_timeout")
-        linkWasUp = true
 
         silence(PRE_ROLL_MS)
         play(Tones.sessionStart)
@@ -258,17 +231,14 @@ class AudioLink(
     suspend fun close(result: String) = withContext(NonCancellable + Dispatchers.IO) {
         if (closed) return@withContext
         closed = true
-        val toHearingAid = linkWasUp && audio.communicationDevice?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
         track?.let { track ->
-            if (result != "cancelled" && toHearingAid) {
+            if (result != "cancelled") {
                 val tone = (if (result == "ok") Tones.sessionEnd else Tones.error) + Tones.silence(TAIL_MS)
                 runCatching { track.write(tone, 0, tone.size, AudioTrack.WRITE_BLOCKING) }
             }
             runCatching { track.stop() }
             track.release()
         }
-        // A failure before the link was up must not be audible on the phone itself.
-        if (result != "ok" && result != "cancelled" && !toHearingAid) vibrateFailure()
         track = null
         if (routeRequested) audio.clearCommunicationDevice()
         val headset = headset
@@ -280,15 +250,6 @@ class AudioLink(
         }
         focusRequest?.let { audio.abandonAudioFocusRequest(it) }
         step("end", mapOf("result" to result, "voiceRecognitionStopped" to stopped))
-    }
-
-    private fun vibrateFailure() {
-        runCatching {
-            context.getSystemService(Vibrator::class.java).vibrate(
-                VibrationEffect.createWaveform(longArrayOf(0, 110, 120, 110), -1),
-                VibrationAttributes.createForUsage(VibrationAttributes.USAGE_COMMUNICATION_REQUEST),
-            )
-        }
     }
 
     /** Feeds silence (so this app counts as playing) until [condition] holds or time runs out. */

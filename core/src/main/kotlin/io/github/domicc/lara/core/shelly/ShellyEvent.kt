@@ -2,6 +2,7 @@ package io.github.domicc.lara.core.shelly
 
 import io.github.domicc.lara.core.input.Gesture
 import io.github.domicc.lara.core.input.Input
+import io.github.domicc.lara.core.input.InputPath
 import io.github.domicc.lara.core.input.InputSource
 
 /**
@@ -27,9 +28,16 @@ data class ShellyEvent(
     val missedBefore: Int,
     val elapsedMs: Long,
 ) {
-    /** One input per pressed button, for the router. */
-    fun toInputs(): List<Input> =
-        presses.map { Input(InputSource.SHELLY, elapsedMs, it.button, it.gesture) }
+    /**
+     * One input per pressed button, for the router. The loss count goes to the first of them
+     * only, so that two buttons pressed together do not report the same loss twice.
+     *
+     * @param path how the packet reached the app
+     */
+    fun toInputs(path: InputPath): List<Input> =
+        presses.mapIndexed { index, press ->
+            Input(InputSource.SHELLY, elapsedMs, press.button, press.gesture, path, if (index == 0) missedBefore else 0)
+        }
 }
 
 /** @param button 1 to 4: the position of the button object in the packet */

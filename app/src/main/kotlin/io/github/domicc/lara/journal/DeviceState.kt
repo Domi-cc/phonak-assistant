@@ -6,6 +6,7 @@ import android.content.Context
 import android.os.BatteryManager
 import android.os.PowerManager
 import io.github.domicc.lara.assistant.LaraVoiceInteractionService
+import io.github.domicc.lara.shelly.ListenerService
 
 /** The device state that is attached to every journal line. */
 object DeviceState {
@@ -23,6 +24,7 @@ object DeviceState {
             "charging" to battery.isCharging,
             "role" to holdsAssistantRole(context),
             "bound" to LaraVoiceInteractionService.ready,
+            "scan" to ListenerService.status.word,
         )
     }
 

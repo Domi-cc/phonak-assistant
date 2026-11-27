@@ -27,7 +27,7 @@ class ScanStartBudgetTest {
 
     @Test
     fun `starts recorded without asking count as well`() {
-        // the scan on the screen starts whenever its owner asks; the listener then has to wait
+        // a scan that needs no permission to start (the rescue scan) still uses up the budget
         for (i in 0 until 6) budget.record(2_000L + i * 100)
         assertEquals(30_000 - 800 + 200, budget.waitMs(2_800), "the fourth newest start decides")
     }

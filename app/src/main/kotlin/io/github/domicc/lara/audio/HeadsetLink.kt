@@ -19,11 +19,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * connection is asynchronous, and after a hearing-aid tap the app has only 5 seconds to
  * answer, so it is requested as early as possible and kept for the life of the process.
  */
-class HeadsetLink(
-    private val context: Context,
-    private val journal: Journal,
-    val store: HearingAidStore,
-) {
+class HeadsetLink(private val context: Context, private val journal: Journal) {
 
     private val proxy = MutableStateFlow<BluetoothHeadset?>(null)
     private var requested = false
@@ -58,21 +54,20 @@ class HeadsetLink(
     }
 
     /**
-     * The selected hearing aid, if it is connected right now; otherwise null. Never another
-     * headset or a car kit, whatever else is connected.
+     * The device to talk to: the one named by the trigger if it is connected, otherwise the
+     * first connected hands-free device.
      */
     @SuppressLint("MissingPermission")
-    fun hearingAid(headset: BluetoothHeadset): BluetoothDevice? =
-        headset.connectedDevices.firstOrNull { store.isSelected(it) }
+    fun pick(headset: BluetoothHeadset, preferred: BluetoothDevice?): BluetoothDevice? {
+        val connected = headset.connectedDevices
+        return connected.firstOrNull { it.address == preferred?.address } ?: connected.firstOrNull()
+    }
 
-    /** True if the selected hearing aid is connected for hands-free audio right now. */
-    fun hearingAidConnected(): Boolean = proxy.value?.let { hearingAid(it) != null } ?: false
-
-    /** Connected hands-free devices as (address, name), for choosing the hearing aid. */
+    /** Names of the connected hands-free devices, for the setup screen. */
     @SuppressLint("MissingPermission")
-    fun connectedDevices(): List<Pair<String, String>> =
+    fun connectedNames(): List<String> =
         if (!hasConnectPermission()) emptyList()
-        else proxy.value?.connectedDevices?.map { it.address to (it.name ?: "?") } ?: emptyList()
+        else proxy.value?.connectedDevices?.map { it.name ?: "?" } ?: emptyList()
 
     private fun hasConnectPermission(): Boolean =
         context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED

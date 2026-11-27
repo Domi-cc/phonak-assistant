@@ -5,6 +5,7 @@ import io.github.domicc.lara.core.bthome.BthomeParser
 import io.github.domicc.lara.core.bthome.BthomeVectors
 import io.github.domicc.lara.core.input.Gesture
 import io.github.domicc.lara.core.input.Input
+import io.github.domicc.lara.core.input.InputPath
 import io.github.domicc.lara.core.input.InputSource
 import kotlin.random.Random
 import kotlin.test.Test
@@ -211,12 +212,22 @@ class ShellyTrackerTest {
         assertEquals(listOf(ShellyPress(1, Gesture.PRESS), ShellyPress(3, Gesture.PRESS)), event.presses)
         assertEquals(
             listOf(
-                Input(InputSource.SHELLY, 1_000, button = 1, gesture = Gesture.PRESS),
-                Input(InputSource.SHELLY, 1_000, button = 3, gesture = Gesture.PRESS),
+                Input(InputSource.SHELLY, 1_000, button = 1, gesture = Gesture.PRESS, path = InputPath.BLE_CALLBACK),
+                Input(InputSource.SHELLY, 1_000, button = 3, gesture = Gesture.PRESS, path = InputPath.BLE_CALLBACK),
             ),
-            event.toInputs(),
+            event.toInputs(InputPath.BLE_CALLBACK),
         )
         assertEquals(ShellyTotals(received = 1, pressesByButton = mapOf(1 to 1, 3 to 1)), tracker.totals())
+    }
+
+    @Test
+    fun `a loss is reported with the first input of an event only`() {
+        feed(press(10), 0)
+        // packet id 13 after 10: two events lost; buttons 1 and 3 pressed together
+        val event = assertNotNull(feed(remotePacket(13, 0x01, 0x00, 0x01), 10_000))
+        assertEquals(2, event.missedBefore)
+        assertEquals(listOf(2, 0), event.toInputs(InputPath.BLE_RESCUE).map { it.missedBefore })
+        assertEquals(listOf("ble_rescue", "ble_rescue"), event.toInputs(InputPath.BLE_RESCUE).map { it.origin })
     }
 
     @Test
@@ -248,7 +259,7 @@ class ShellyTrackerTest {
         // Y14: all four buttons "none", packet id 18
         val idle = assertNotNull(feed(vector("Y14"), 10_000))
         assertTrue(idle.presses.isEmpty())
-        assertTrue(idle.toInputs().isEmpty())
+        assertTrue(idle.toInputs(InputPath.BLE_CALLBACK).isEmpty())
         assertEquals(IdStep.NEXT, idle.idStep)
         // Y15: beacon with packet id 19, repeated
         val beacon = assertNotNull(feed(vector("Y15"), 20_000))

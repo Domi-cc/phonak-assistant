@@ -1,304 +1,385 @@
-<p align="center">
-  <img src="docs/assets/banner.svg" alt="Lara im Ohr: your AI assistant, in your hearing aid" width="100%">
-</p>
+# Lara im Ohr
 
-<p align="center">
-  <a href="https://github.com/Domi-cc/phonak-assistant/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Domi-cc/phonak-assistant/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <a href="#where-it-stands"><img alt="status: measurement app" src="https://img.shields.io/badge/status-measurement%20app-f59e0b"></a>
-  <img alt="Android 17" src="https://img.shields.io/badge/Android-17%20(API%2037)-3DDC84?logo=android&logoColor=white">
-  <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?logo=kotlin&logoColor=white">
-  <img alt="hearing aid: Phonak Audéo EON R" src="https://img.shields.io/badge/hearing%20aid-Phonak%20Aud%C3%A9o%20EON%20R-0ea5e9">
-  <a href="LICENSE"><img alt="licence: Apache-2.0" src="https://img.shields.io/badge/licence-Apache--2.0-blue"></a>
-</p>
+"Lara im Ohr" (German for "Lara in the ear") is a native Android app for operating a personal assistant through a hearing aid. The assistant is Lara, a self-hosted [Hermes Agent](https://github.com/NousResearch/hermes-agent). A double tap on the hearing aid or a press on a small pocket remote starts an interaction, and tones or speech come back into the hearing aid. The phone stays locked, with the display off, in a pocket.
 
-<p align="center">
-  <b>Tap your ear. Speak. Listen.</b><br>
-  A personal AI assistant that lives in a hearing aid, while the phone stays locked, dark and in your pocket.
-</p>
+The reason: a hearing aid is a microphone and a loudspeaker that its wearer has on all day and that is already connected to the phone. If it can be the whole interface, there is no screen to look at and nothing to take out of the pocket.
 
----
+Whether Android allows this to a sideloaded app, one that is installed from a file and not from an app store, was not known. Version 0.1 is therefore a **measurement app**. It contains the foundation of the later app (permissions, input paths, audio path, journal) and measures on one real phone what works. It has no menu and no connection to Hermes yet. Nothing here is guaranteed: not on other devices, and not on the tested one after its next system update.
 
-> [!IMPORTANT]
-> **This is a measurement app, not a product.** It exists to find out what Android really allows
-> with a locked phone and a hearing aid. Everything below is marked as either
-> 📏 **measured on the device** or 📖 **read from the Android 17 source**. Nothing is guaranteed,
-> and it has been tried on exactly one phone and one hearing aid.
+## Status
 
-## What is this?
+As of 2026-11-27, on the one phone and the one hearing aid listed below.
 
-*Lara* is a self-hosted AI assistant (a [Hermes Agent](https://github.com/NousResearch/hermes-agent)).
-The goal of this project is to talk to her through a **hearing aid** and a small **pocket remote**:
-hear the weather, step through appointments and to-dos, dictate a note, all without taking the phone
-out, unlocking it or even lighting up its screen.
-
-Before any of that can be built, four questions need an answer on real hardware:
-
-1. Can a tap on the hearing aid start *our* app on a locked, dark phone?
-2. Can the app then record from the **hearing-aid microphone** and speak into the aid?
-3. Does a button press on a pocket remote arrive, even after hours of sleep?
-4. Can the app say something on its own, at the right moment?
-
-This repository is the app that answers them, and the notes on everything we learned on the way.
-
-## Where it stands
-
-| | What | State |
-|---|---|---|
-| ✅ | A sideloaded app can be chosen as Android's digital assistant and keeps the role across updates | 📏 measured |
-| ✅ | A **double tap on the hearing aid starts the app while the phone is locked and the display is off**; the display stays off | 📏 measured |
-| ✅ | The app opens the wideband voice link in about 0.6 to 0.8 s, records from the **hearing-aid microphone** and plays audio into the aid | 📏 measured |
-| ✅ | The app can speak **unprompted** over the media channel ("16 Uhr 25"), and only if the sound would reach the hearing aid and nothing else | 📏 measured (screen on) |
-| 🧪 | Hourly announcement fired by an alarm from deep sleep | built, being measured |
-| 🧪 | The same tap after hours of idle, and with the phone in a pocket | not measured yet |
-| 🔨 | Pocket remote (Shelly BLU RC Button 4): reception, count session, spoken numbers | in progress |
-| 🗓 | Spoken menu, Hermes connection, media keys | planned |
-
-<sub>All measurements: 27 November 2026, one device. See <a href="#tested-hardware">Tested hardware</a>.</sub>
-
-### The eleven seconds that mattered
-
-The first run with the phone **locked and dark**, as the app's own journal recorded it
-(device name removed; `·dunkel ·gesperrt` is the app's German for *dark, locked*):
-
-```text
-16:15:31  tap_intent                           ·dunkel ·gesperrt
-16:15:31  session_voice_recognition_requested  ·dunkel ·gesperrt   accepted=true  ms=8
-16:15:31  session_link_up                      ·dunkel ·gesperrt   ms=744
-16:15:33  session_speak_now                    ·dunkel ·gesperrt   ms=1830
-16:15:37  session_recorded                     ·dunkel ·gesperrt   fromHearingAid=true  silenced=false  rmsDbfs=-21
-16:15:41  session_echo_played                  ·dunkel ·gesperrt   ms=10395
-16:15:42  session_end                          ·dunkel ·gesperrt   result=ok
-```
-
-Screen wake-ups during those eleven seconds: **zero**.
-
-## How it works
-
-```mermaid
-flowchart LR
-    subgraph you["at your ear, in your pocket"]
-        TAP["Double tap<br/>on the hearing aid"]
-        BTN["Pocket remote<br/>Shelly BLU RC Button 4"]
-        KEY["Media keys"]
-    end
-
-    subgraph phone["phone: locked, display off"]
-        VCA["VoiceCommandActivity<br/>invisible, finishes at once"]
-        SCAN["Listener service<br/>BLE scan"]
-        MKL["Media-key listener"]
-        ROUTER{{"Input router"}}
-        SESSION["Session service<br/>microphone foreground service"]
-        ANN["Announcer<br/>alarms, later push"]
-        VIS[["Assistant role<br/>VoiceInteractionService bound"]]
-    end
-
-    AID(("Hearing aid<br/>microphone + speaker"))
-    HERMES[("Hermes Agent<br/>self-hosted")]
-
-    TAP -- "hands-free voice recognition" --> VCA --> ROUTER
-    BTN -. "BTHome advertisement" .-> SCAN -.-> ROUTER
-    KEY -.-> MKL -.-> ROUTER
-    ROUTER --> SESSION
-    SESSION <-- "voice link, 16 kHz" --> AID
-    ANN -- "media channel" --> AID
-    VIS -. "background microphone and audio rights" .-> SESSION
-    SESSION -. "planned" .-> HERMES
-```
-
-<sub>Solid lines work today. Dashed lines are in progress or planned.</sub>
-
-**What happens when you tap your ear:**
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant A as Hearing aid
-    participant B as Android Bluetooth stack
-    participant T as VoiceCommandActivity
-    participant S as Session service
-    Note over A,S: phone locked, display off
-    A->>B: double tap = "voice recognition, please"
-    B->>T: startActivity(VOICE_COMMAND), about 60 ms later
-    T->>S: start foreground service, then finish()
-    S->>B: BluetoothHeadset.startVoiceRecognition(), deadline 5 s
-    B-->>A: OK, wideband voice link opens (0.6 to 0.8 s)
-    S->>A: start tone, "speak now" tone
-    A->>S: your voice, from the hearing-aid microphones
-    S->>A: reply (today: an echo of what you said)
-    S->>B: stopVoiceRecognition()
-    Note over A,S: the display never turned on
-```
-
-## What Android taught us
-
-The plan we started with was wrong in several places. These are the things worth knowing before
-you build something similar.
-
-1. **The hearing-aid gesture does not go through the assistant role.** 📏
-   Android's Bluetooth stack turns the hands-free "voice recognition" request into a plain
-   `startActivity` with `android.intent.action.VOICE_COMMAND`. Whoever the owner picked as
-   *Always* for that intent gets it. On a Pixel the Google app competes for it.
-2. **Without a default handler, a tap on a locked phone goes nowhere.** 📏
-   Android wants to show its app chooser, cannot, and closes it 40 ms later. No sound, no error.
-3. **You still want the assistant role.** 📖
-   Not for routing, but because the system keeps the selected `VoiceInteractionService` bound,
-   and that binding is what lets a background trigger (a remote, an alarm) open the microphone.
-   A battery-optimisation exemption alone does not.
-4. **You have five seconds.** 📏
-   The app must answer with `BluetoothHeadset.startVoiceRecognition()` within 5 s. A second tap
-   during those 5 s is rejected by Android, and a tap during a running session ends it.
-5. **Do not ask for the audio route yourself.** 📏
-   Calling `AudioManager.setCommunicationDevice()` during a voice-recognition session makes the
-   audio server open a "virtual call", and the Bluetooth stack reacts by cancelling the voice
-   recognition. Our first build lost one tap in three to exactly this race.
-6. **The voice link only lives while something is playing.** 📏
-   It drops within tens of milliseconds once no stream is active. The app therefore keeps one
-   `AudioTrack` running for the whole session and feeds it silence between sounds.
-7. **`TextToSpeech.speak()` plays in the engine's process, not yours.** 📖
-   Fine for an announcement over the media channel. For the voice link, synthesise to a file and
-   play it yourself, or point 6 bites.
-8. **Android 17 throttles background BLE scanning.** 📖 (effect on this phone not measured yet)
-   Apps without visible UI get a per-hour allowance; after that the radio listens for 512 ms every
-   10.24 s. A remote that advertises for one second per press is then caught about one time in
-   seven. Expectation: fine for navigating *inside* a session, poor for waking the phone.
-9. **Android 17 mutes background audio that lacks the right state.** 📖
-   It does so silently. The phone's own log shows it muting other apps (`AudioHardening` lines in
-   `dumpsys audio`).
-10. **Google's own assistant gives up on a locked phone.** 📏
-    It opens the voice link, waits about five seconds and closes it again.
-
-## Rules the app keeps
-
-- **Only one hearing aid, chosen by you.** Sessions and announcements go to the device you
-  selected, identified by its address. Never to a car kit, another headset or the phone speaker.
-  If the sound would go anywhere else, the app stays silent and writes down why.
-- **The display stays off.** Nothing in the app asks for the screen.
-- **The microphone opens only after a deliberate trigger.** There is no wake word and no
-  always-on listening.
-- **Other devices keep their voice button.** A voice-button press from a car or another headset is
-  handed on to the phone's own assistant.
-- **Failures are never silent.** A tone in the hearing aid, a vibration, and a line in the journal.
-
-## Try it
-
-> [!NOTE]
-> There is no release yet. Until the first tagged build appears under *Releases*, build the APK
-> yourself (see [Build from source](#build-from-source)).
-
-**You need:** an Android 16+ phone (minSdk 36), a hearing aid or headset with a hands-free
-"voice assistant" gesture, and `adb` for installing.
-
-1. Install the APK: `adb install -r app/build/outputs/apk/debug/app-debug.apk`
-2. Open **Lara im Ohr** and work down the checklist (the app's texts are German):
-   - *Berechtigungen*: allow microphone, nearby devices and notifications.
-   - *Assistentenrolle*: choose the app as digital assistant.
-   - *Hörgerät*: pick which connected device is your hearing aid.
-3. With the phone **unlocked**, do the assistant gesture on the hearing aid once. Android shows a
-   chooser: pick **Lara im Ohr** and **Always**.
-4. Lock the phone, let the display go dark, and tap again.
-
-Android drops the *Always* choice silently whenever another app that handles the same intent is
-installed. The checklist line *Hörgeräte-Sprachtaste* shows who currently gets the tap.
-
-### What you hear
-
-| Sound | Meaning |
+| Part | State |
 |---|---|
-| Two rising tones | the session is open |
-| One higher tone | speak now |
-| One lower tone | recording finished |
-| *your own voice* | the echo test plays back what the hearing-aid microphone recorded |
-| Two falling tones | the session closed normally |
-| Two low buzzes | something went wrong (in the hearing aid) |
-| A short double vibration | something went wrong before the link to the hearing aid was up |
-| One soft tone, then speech | an unprompted announcement |
+| A sideloaded build can be selected as the phone's digital assistant, and Android keeps its assistant service bound | Verified on the device |
+| A double tap on the hearing aid starts the app while the phone is locked and the display is off; the display stays off | Verified on the device |
+| The app opens the wideband voice link, records from the hearing-aid microphone and plays audio into the hearing aid | Verified on the device |
+| Reception of the Shelly remote (BTHome v2 advertisements, background scan) | Built, not yet measured |
+| Count session: every received button press is counted aloud into the hearing aid | Built, not yet measured |
+| Spoken numbers, prepared ahead of time with the phone's speech engine, with tones as fallback | Built, not yet tried on the device |
+| Control over adb for repeatable series, sharing the journal | Built, not yet tried on the device |
+| Media keys as a third input | Planned |
+| Spoken menu | Planned |
+| Connection to Hermes | Planned |
 
-### The journal
-
-Every event is written to a journal with three clocks, screen and lock state, Doze state, battery
-and whether the assistant binding is alive. It is on the app's screen and in logcat:
-
-```bash
-adb logcat -s LaraJournal
-```
-
-## Build from source
-
-```bash
-# JDK 21, Android SDK platform 37.2 and build-tools 36.0.0
-./gradlew :core:test :app:assembleDebug
-```
-
-Pinned and verified on 27 November 2026: Gradle 9.9.2, Android Gradle Plugin 9.5.3, Kotlin 2.4.21,
-compileSdk 37.2, minSdk 36, targetSdk 36 (switch with `-Plara.targetSdk=37`).
-
-> [!WARNING]
-> **Use one signing key for every build you ever install.** An update signed with a different key
-> cannot replace the app, and uninstalling first loses the assistant role, the permissions and
-> the *Always* choice. Put your keystore under `.local/keystore/` (ignored by git); see
-> `app/build.gradle.kts` and [`docs/release.md`](docs/release.md).
-
-**Layout**
-
-| Path | What |
-|---|---|
-| `core/` | pure Kotlin, no Android imports: journal format (and soon BTHome parsing), tested on the JVM |
-| `app/…/trigger` | the invisible activity that receives the hearing-aid tap |
-| `app/…/assistant` | the three services that make the app a digital assistant |
-| `app/…/audio` | the voice link to the hearing aid, the session service, the echo test |
-| `app/…/announce` | unprompted announcements and the hourly test |
-| `docs/design/` | the design document for this version (German) |
-
-<details>
-<summary><b>Debugging toolkit</b>: the commands worth knowing</summary>
-
-```bash
-# Who is the assistant, and is its service bound?
-adb shell cmd role get-role-holders android.app.role.ASSISTANT
-adb shell dumpsys voiceinteraction | grep -m3 -E 'mComponent|mBound'
-
-# Who gets the hearing-aid voice button right now?
-adb shell cmd package resolve-activity --brief -a android.intent.action.VOICE_COMMAND -c android.intent.category.DEFAULT
-adb shell cmd package query-activities --brief -a android.intent.action.VOICE_COMMAND
-
-# Watch a tap arrive and the voice link come up
-adb logcat -s HeadsetService HeadsetStateMachine HeadsetSystemInterface ActivityTaskManager AS.AudioDeviceBroker LaraJournal
-
-# Bluetooth: bonded devices, profiles, scan clients; flags that change scan behaviour
-adb shell dumpsys bluetooth_manager
-adb shell device_config list bluetooth | grep -i scan
-
-# Android 17 background-audio hardening: what was muted, and make violations loud while testing
-adb shell dumpsys audio | grep -i hardening
-adb shell cmd audio set-hardening throw
-
-# Is the display really off, and who woke it?
-adb shell dumpsys power | grep -E 'mWakefulness=|Waking up'
-```
-
-Wireless debugging is worth setting up early: a phone on a USB cable never reaches deep sleep, so
-nothing measured on a cable says much about a phone in a pocket.
-
-</details>
+"Verified" means that it worked on this device on that day. It says nothing yet about behaviour after hours of standby, after a reboot or over many repetitions. Those measurements are what this app is for.
 
 ## Tested hardware
 
-| | |
+| Role | Device |
 |---|---|
-| Phone | Google Pixel 10 Pro XL, Android 17 (build `CP3A.261005.005`) |
-| Hearing aid | Phonak Audéo EON R, right ear only, Bluetooth Classic (hands-free + media) |
-| Remote | Shelly BLU RC Button 4 (`SBBT-004CUS`, the model *without* Zigbee) |
+| Phone | Google Pixel 10 Pro XL, Android 17, build `CP3A.261005.005` |
+| Hearing aid | Phonak Audéo EON R, worn on the right ear only. It is connected over Bluetooth Classic: hands-free for calls and voice, plus music streaming |
+| Remote | Shelly BLU RC Button 4, model `SBBT-004CUS` (the model without Zigbee). It sends BTHome v2 advertisements over Bluetooth Low Energy |
 
-Nothing else has been tried. Other hearing aids that offer a "voice assistant" gesture over the
-hands-free profile should behave the same on the Android side; whether they do is unknown.
+Nothing else was tried: no other phone, no other Android version, no other hearing aid, no pair of hearing aids, no other remote.
+
+The tap path uses only standard hands-free behaviour (see below), so other Bluetooth Classic hearing aids and headsets with a voice-assistant gesture may behave the same way. That is a guess until someone measures it.
+
+## How it works
+
+### Three input paths
+
+```text
+ A  Hearing aid, double tap           B  Pocket remote, button press        C  Media key
+    |                                    |                                     |
+    | hands-free profile:                | BTHome v2 advertisement             | (planned)
+    | "start voice recognition"          | (Bluetooth LE, no connection)       |
+    v                                    v                                     v
+ Android Bluetooth stack              BLE scan, filtered on the remote      media-key listener
+    |                                 (throttled while the display is off)     |
+    | starts an activity with            |                                     |
+    | android.intent.action.VOICE_COMMAND|                                     |
+    v                                    |                                     |
+ VoiceCommandActivity                    |                                     |
+ (invisible, finishes at once)           |                                     |
+    |                                    |                                     |
+    +------------------+-----------------+-------------------------------------+
+                       |          (also: a button on the app's screen)
+                       v
+        SessionService: foreground service of type "microphone",
+        runs only for the length of one session
+                       |
+                       v
+        AudioLink: voice link to the hearing aid (16 kHz mono)
+        out: tones, recorded or spoken audio      in: hearing-aid microphone
+
+ Present the whole time:
+   VoiceInteractionService   kept bound by Android while the app is the digital assistant.
+                             This binding is where the background rights come from.
+   Journal                   every event, with the state of the phone at that moment.
+```
+
+Path A is verified on the device. Path B is built and not yet measured. Path C is planned.
+
+The expected division of labour, which version 0.1 is there to check: wake the assistant with a tap on the hearing aid, navigate with the remote, media keys as an extra.
+
+### What surprised us
+
+Each statement is marked with where it comes from. "Read from Android 17 source" refers to the public Android 17.0 release (tag `android-17.0.0_r1`, June 2026). The phone runs a newer build, and its Bluetooth stack is updated separately from the system. A statement from the source is therefore an expectation until it has been measured.
+
+**1. The tap is not an assistant request.**
+
+*Measured on the device.* A double tap makes the hearing aid ask the phone for voice recognition over the hands-free profile. About 60 ms later Android's Bluetooth stack starts an activity with `android.intent.action.VOICE_COMMAND`. This also works with the phone locked and the display off, and the display stays off. Which app receives the intent is ordinary intent resolution and has nothing to do with the assistant role: with no saved default, the tap opened Android's app chooser, although an assistant was selected. The intent carried the Bluetooth device and the profile as extras. This app targets API 36, and the documentation promises the extras only to apps that target a higher level.
+
+*Read from Android 17 source.* `HeadsetSystemInterface.activateVoiceRecognition()` in the Bluetooth module builds the intent without a package name and without looking at any role, and the assistant role defines no preferred activity for this action. The app therefore declares an ordinary exported activity for `VOICE_COMMAND`, and the owner chooses it once with "Always".
+
+**2. The assistant role is needed anyway.**
+
+*Read from Android 17 source.* Android keeps the `VoiceInteractionService` of the selected assistant bound, with flags that give the app the standing of a foreground service, the microphone capability and the right to start things from the background. This binding, not the role by itself, is what allows a microphone foreground service to start and to record real audio while the phone is locked and dark. The role does not grant the microphone permission, and the battery-optimisation exemption is no substitute: it allows a foreground service to start from the background in general, but not one of the microphone type. A tap brings a short allowance of its own (about 10 s after an activity start). A press on the remote brings none, so every other input path rests on the binding.
+
+*Read from Android 17 source.* To qualify, an app must declare three services: the interaction service, a session service and a recognition service. Without the recognition service Android clears the assistant setting again. The role is checked again on every package change, and a build that no longer qualifies loses it silently to the default assistant.
+
+*Measured on the device.* A sideloaded build can be selected as digital assistant, the system binds its service, and with that in place a tap on the locked, dark phone leads to a recording from the hearing-aid microphone. Not measured yet: a control run without the role.
+
+**3. The app has 5 seconds to answer.**
+
+*Read from Android 17 source.* After starting the activity, the Bluetooth stack waits 5 seconds for an app to call `BluetoothHeadset.startVoiceRecognition(device)`. The permission `BLUETOOTH_CONNECT` is enough for that call. If it does not come, the hearing aid gets an error. The stack holds a wake lock only for those 5 seconds and releases it as soon as the app answers, so the app takes a short wake lock of its own as its first step. The connection to the hands-free profile service that the call needs is set up asynchronously, so the app asks for it when its process starts and keeps it.
+
+*Measured on the device.* A second tap within 5 s of an unanswered one is dropped. A tap during a running session ends the session. With the Google app as reference, the voice link was up 0.4 to 0.7 s after the call, in wideband quality (16 kHz).
+
+**4. Asking for the audio route too early cancels the session.**
+
+*Measured on the device.* The obvious next step after answering, `AudioManager.setCommunicationDevice()` on the hearing aid, is a mistake if it comes too early. On this phone the link is created by the audio server on behalf of the Bluetooth process (logcat: `AS.AudioDeviceBroker: setCommunicationRouteForClient for uid: 1002`). If the app's own request arrives before that link is up, it is treated as a "virtual call", and the stack stops the voice-recognition session it has just accepted (logcat: `HeadsetService: startScoUsingVirtualVoiceCall: voice recognition is still active, just called stopVoiceRecognition`). In some attempts the link was then refused (`HeadsetService: isScoAcceptable: rejected SCO`) and never came up. The order that worked: call `startVoiceRecognition`, wait until `BluetoothHeadset.isAudioConnected(device)` is true, and only then call `setCommunicationDevice`.
+
+*Read from Android 17 source.* The app's own request is still needed, because Android drops a communication route about 6 s after the requesting app is neither playing nor recording. So the app registers for the route once the link is up and keeps its own `AudioTrack` running, with silence between sounds. Speech from `TextToSpeech.speak()` is played by the speech engine's process and does not count as the app's own playback. Spoken output will therefore be synthesised into audio first and played by the app.
+
+**5. Android 17 throttles background BLE scanning.**
+
+*Measured on the device.* `adb shell device_config list bluetooth` shows `scan_allowance_throttling_enabled=true`. In the public Android 17.0 source this flag exists but is off.
+
+*Read from Android 17 source.* With the flag on, only an app that is in the foreground on the screen scans freely, and while the display is off no ordinary app is. Every other app, with or without a foreground service, gets an allowance per hour: 6 minutes in the fastest scan mode or 24 minutes in the balanced one. After that its scan is forced into the screen-off low-power mode, which listens for 512 ms every 10.24 s. Scans without a filter are suspended completely while the display is off. None of these values can be changed over adb.
+
+*Expected, not measured.* According to the vendor's changelog this remote model sends for about one second per gesture, with packets about 20 ms apart. By calculation the low-power mode catches that in roughly 15 % of cases, about one press in seven. The remote is therefore expected to be good for navigating inside a session and poor for waking the phone after a long pause. Home Assistant users report for this model that only about every fifteenth press arrived with active scanning and every press with passive scanning. We have not measured that either.
+
+**6. Android 17 mutes background audio.**
+
+*Read from the Android 17 documentation and source.* An app that plays audio must have a visible activity or a running foreground service. With the display off there is no visible activity, so only the foreground service counts. For apps that target API 37 the service must also hold while-in-use rights. An app that breaks the rule gets no error: `AudioTrack.write()` succeeds, the volume is zero, and a request for audio focus fails.
+
+*Measured on the device.* The enforcement is active on this phone, and `adb shell dumpsys audio` logs violations. According to the source they are in its section "Hardening enforcement".
+
+The app therefore plays only from inside its microphone foreground service. It targets API 36 for now, where the more lenient rule applies; `-Plara.targetSdk=37` builds the strict variant.
+
+### Rules the app keeps to
+
+- It never turns the screen on.
+- The voice link is open only during a session and is closed on every exit path. A link left open makes Android reject the next tap.
+- It never records without a deliberate trigger. A recording counts only if Android reports the hearing aid as the microphone actually used. There is no fallback to the phone's microphone.
+- It holds no permanent wake lock, only short ones for the hand-over from a trigger and for a running session.
+- Every failure is written to the journal.
+
+The design document (in German) is [docs/superpowers/specs/2026-11-27-mess-app-design.md](docs/superpowers/specs/2026-11-27-mess-app-design.md).
+
+## Install and set-up
+
+You need a phone with Android 16 or newer (the app's `minSdk` is 36; only Android 17 was tested) and a hearing aid that is paired with the phone for calls and whose tap gesture is set to "voice assistant". According to Phonak's documentation for earlier models there is one tap function per ear, so with a single hearing aid it is either the voice assistant or pause/resume. A computer with adb is optional.
+
+The app's own texts are German. The names in quotation marks below are what you see on its screen.
+
+1. **Get the APK.** Download `lara-im-ohr.apk` from the [Releases](../../releases) page, or build it (see "Building from source"). If the Releases page is still empty, building is the only way. A release also carries `lara-im-ohr.apk.sha256`; check the download with `sha256sum -c lara-im-ohr.apk.sha256`. Install the APK by opening the file on the phone, or with `adb install -r lara-im-ohr.apk`.
+2. **Open the app.** The upper part of the screen consists of sections that open and close with a tap on their title. The first one is a checklist ("Einrichtung"). Each line shows a tick or a cross. Where Android offers a direct way to fix a line, there is a "Beheben" (fix) button.
+3. **Grant the permissions** ("Berechtigungen"): microphone, nearby devices (Bluetooth) and notifications. Android shows a notification while a session runs, which is why the last one is needed.
+4. **Select the app as digital assistant** ("Assistentenrolle"). "Beheben" opens Android's voice-input settings. Choose "Lara im Ohr" as the digital assistant app. The line is fulfilled when it reads "Lara · Dienst gebunden", which means that Android has bound the app's assistant service. "Lara gewählt, Dienst noch nicht gebunden" means that the app is selected but the service is not bound yet. From then on the phone's assist gesture also goes to this app instead of your previous assistant, until you switch back in the same settings.
+5. **Make the app the target of the hearing-aid tap** ("Hörgeräte-Sprachtaste"). Unlock the phone and double-tap the hearing aid once. Android shows a chooser. Select "Lara im Ohr" and then "Always". The line then reads "→ Lara („Immer“)". The chooser is the only way to do this. There is no setting and no adb command for it (read from Android 17 source).
+6. **Exempt the app from battery optimisation** ("Akku-Ausnahme"). "Beheben" opens the system dialog.
+7. **Check the hearing aid** ("Hörgerät (Freisprechen)"). The line lists the devices that are connected for hands-free calls and should name your hearing aid.
+
+### The "Always" choice can disappear
+
+Android silently drops the "Always" choice when another app that handles the same intent is installed, or when an installed app starts to handle it (read from Android 17 source: the saved choice is discarded as soon as the set of candidates grows). Nothing tells you. The next tap on a locked, dark phone then opens the chooser behind the lock screen, where nobody sees it, and the hearing aid gets an error after 5 seconds.
+
+The app checks which activity Android would start for the tap and shows the result in the line "Hörgeräte-Sprachtaste":
+
+- "→ Lara („Immer“)": all is well.
+- "kein Standard: entsperrt tippen, Lara › „Immer“ wählen": there is no default any more. Repeat step 5.
+- "→" followed by a package name: another app holds the default. Clear it in Android's settings for that app ("Open by default"), then repeat step 5.
+
+Uninstalling the app loses the choice as well. See the signing rule under "Building from source".
+
+### After a reboot
+
+Unlock the phone once. Before the first unlock Android neither binds the assistant service nor finds the tap activity (read from Android 17 source). Working before the first unlock is not a goal of version 0.1.
+
+### Checking over adb
+
+```sh
+adb shell cmd role get-role-holders android.app.role.ASSISTANT
+adb shell cmd package resolve-activity --brief -a android.intent.action.VOICE_COMMAND
+```
+
+The first command must print `io.github.domicc.lara`. The second must name `io.github.domicc.lara/.trigger.VoiceCommandActivity`. If it names `android/com.android.internal.app.ResolverActivity`, there is no default and Android would show the chooser.
+
+According to the source, `adb shell cmd role add-role-holder android.app.role.ASSISTANT io.github.domicc.lara` does the same as step 4. We have not verified that command ourselves.
+
+## Trying it
+
+### The echo test
+
+The echo test checks the audio path. It opens the voice link, records a few seconds from the hearing-aid microphone and plays the recording back, so that you hear with your own ear which microphone was used.
+
+Start it in one of these ways:
+
+- Press "Echo-Test jetzt" in the app (section "Messen").
+- Press button 3 of the remote during a count session (see below). The test then runs inside that session.
+- Send the adb command `lara.ECHO` (see [docs/adb-control.md](docs/adb-control.md)).
+
+The phone's assist gesture is wired to the same test. That trigger is not on the verified list.
+
+Earlier builds started the echo test on the double tap, and that is the combination that was verified on the device. The tap now opens a count session, which uses the same voice link but has not run on the device yet.
+
+What you hear in the hearing aid:
+
+| Sound | Meaning |
+|---|---|
+| Rising pair of tones | The session is open: the voice link to the hearing aid is up |
+| Single higher tone | Speak now |
+| Single lower tone | Recording finished |
+| Your own voice | The recording, played back |
+| Falling pair of tones | The session closed normally |
+| Two low buzzes | Error |
+
+All tones are below 1 kHz, so that they stay audible with high-frequency hearing loss.
+
+If the two low buzzes come directly before the playback, the recording was not accepted: Android did not report the hearing aid as the microphone actually used, or the recording was silent. You still hear what was recorded, and the session then ends with the error sound instead of the falling pair.
+
+A second double tap during a session ends it at once. No closing sound follows, because the hearing aid has already closed the link.
+
+If you hear nothing in the hearing aid, the link did not open. The journal says why.
+
+### The count session
+
+Built, not yet tried on the device. This is the measurement "wake by tap, navigate by remote": while the voice link is open, every press of the remote that arrives is answered with its running number, "eins", "zwei", "drei". You count along and hear at once when a press is lost.
+
+Open it in one of these ways:
+
+- Lock the phone, wait until the display is off, and double-tap the hearing aid.
+- Press a button of the remote, if "Shelly weckt auf" is switched on (section "Einstellungen"; on by default). That press is number one.
+- Press "Zählsitzung starten" in the app, or send the adb command `lara.COUNT`.
+
+In the session:
+
+| You do | You hear |
+|---|---|
+| Press button 1, 2 or 4, with any gesture | The next number |
+| Press button 3 | The echo test, inside the same session |
+| Nothing for 20 seconds | The falling pair of tones: the session closes |
+| Double-tap the hearing aid | The session ends |
+
+If the packet numbers of the remote show that something it sent did not arrive, you hear "einer fehlt" (or "zwei fehlen" and so on) before the number. The remote numbers every packet it sends, so this can also be a lost beacon and not a lost press. If presses arrive faster than numbers can be spoken, only the newest number is spoken; the journal still has a `session_count` line for every press.
+
+The numbers are spoken by the phone's own speech engine, but not live: the app has each prompt synthesised into a file once, when the main screen is opened or the assistant service is bound, and plays the files itself. The line "Ansagen" in the checklist shows how many are ready. Where a prompt is missing (first start, no speech engine, no German voice), tones stand in: one to five short ticks for the numbers 1 to 5, a three-note figure for every higher number, and one long low tone for a loss.
+
+With "Shelly weckt auf" switched off, a press outside a session opens nothing and plays nothing. It is only journaled and counted. That is the mode for measuring over hours how many presses Android's scan throttling lets through.
+
+### The screen
+
+Everything is on one screen. The upper part scrolls and consists of sections that open and close with a tap on their title; the lower part always shows the journal.
+
+| Section | What is in it |
+|---|---|
+| "Einrichtung" | The checklist from "Install and set-up", plus the remote, the listener service and the spoken prompts |
+| "Messen" | "Echo-Test jetzt", "Zählsitzung starten", and a text field that writes a free-text marker into the journal ("ab jetzt 2 h Ruhe") |
+| "Zähler heute" | Events of the remote received and missed, hearing-aid taps, sessions by result. Counted from today's journal; simulated presses are left out |
+| "Shelly: Anlernen und Funk-Test" | A scan that runs only while the app is on the screen: pick the remote by pressing one of its buttons ("Anlernen"), forget it again ("Vergessen"), and watch its raw packets with a count of events and of missed events. The switch "Passive Scan-Art" changes the scan type for this scan and for the background scan |
+| "Einstellungen" | Scan mode outside and inside a session, the rescue scan, "Shelly weckt auf", and a button that makes the spoken prompts anew |
+
+For running a series of measurements from a computer, see [docs/adb-control.md](docs/adb-control.md).
+
+### The journal
+
+Every event is written to a journal: one line per event with the time, the name of the event and the state of the phone at that moment (display on or off, locked, Doze, battery, role held, assistant service bound). The lower part of the app's screen shows it with the newest line on top ("Protokoll (neueste oben)"). Failures are shown in the error colour. The marks "·dunkel", "·gesperrt" and "·Doze" mean display off, locked and Doze.
+
+To follow it live on a computer:
+
+```sh
+adb logcat -s LaraJournal
+```
+
+Each line is a JSON object with the keys `t` (wall-clock time in ms), `el` (ms since boot, counting sleep), `up` (ms since boot, not counting sleep), `type`, `f` (the fields of the event) and `ctx` (the state of the phone). If `el` advances more than `up` between two events, the phone slept in between.
+
+A successful echo test started from the screen looks like this. The event names are those at the time of writing.
+
+```text
+input_routed                          origin=screen route=start_echo
+session_start
+session_voice_recognition_requested   the app answered the hearing aid
+session_hfp_audio_up                  the Bluetooth stack opened the audio link
+session_route_requested
+session_link_up                       the rising pair of tones follows
+session_speak_now
+session_recorded                      microphone used, level, time to the first sound
+session_echo_played
+session_end                           result=ok
+```
+
+A count session opened by a tap begins with `tap_intent` (Android started the app for the tap) and `input_routed`, opens the link with the same lines up to `session_link_up`, and then goes on like this:
+
+```text
+session_count_open                    the program takes presses now
+shelly_press                          a press of the remote arrived
+input_routed                          origin=ble_callback route=to_session
+session_count                         number=1, said=true, voice=speech or tones, waitMs
+session_count_end                     count, reason=idle or tap
+session_end                           result=ok
+```
+
+Every `session_*` line carries `ms`, the time since the trigger. Lines to look for when something fails:
+
+- `session_refused`: Android did not let the app start its microphone service.
+- `session_end` with a result other than `ok`, for example `link_timeout`, `no_hearing_aid_connected`, `recording_not_from_hearing_aid` or `cancelled`.
+- `assistant_unbound`: the system dropped the assistant service.
+- `input_dropped`: a press waited for a session that did not open, or arrived as the session closed.
+- `session_count` with `missed` above 0, `shelly_press` with `missedBefore` above 0: the remote sent something that did not arrive.
+
+Lines that come from an input say where it came from, in the field `origin` (in `session_*` lines: `trigger`): `tap`, `ble_callback` or `ble_rescue` for the two scans of the remote, `screen`, `adb`, `simulated`, `assist`.
+
+The journal is stored in the app's private storage, one file per day. Its lines contain Bluetooth addresses and device names. The app never sends the journal anywhere by itself. "Heute teilen" and "Alle teilen" above the journal hand today's file or all files to Android's share sheet; check a copy before you post it.
+
+## Building from source
+
+Requirements:
+
+- JDK 21
+- Android SDK with platform 37.2 and build-tools 36.0.0: `sdkmanager "platform-tools" "platforms;android-37.2" "build-tools;36.0.0"`
+
+```sh
+export JAVA_HOME=/path/to/jdk-21
+export ANDROID_HOME=/path/to/android-sdk
+./gradlew :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+The Gradle wrapper fetches Gradle itself. The versions of the Android Gradle Plugin, Kotlin and the libraries are pinned in `gradle/libs.versions.toml`. The Android Gradle Plugin 9 has Kotlin support built in, so do not add the `org.jetbrains.kotlin.android` plugin.
+
+The project has two modules. `:core` is pure Kotlin without Android imports and is tested on the JVM with `./gradlew :core:test`. `:app` is the Android part.
+
+`compileSdk` is 37.2, `minSdk` 36 and `targetSdk` 36. Gradle properties: `-Plara.targetSdk=37`, `-Plara.versionName=...`, `-Plara.versionCode=...`.
+
+Local builds have `versionCode` 1 unless you set it, and Android does not install a lower version code over a higher one. After installing a release, build with `-Plara.versionCode=` set to at least the code of that release. How releases are cut is described in [docs/release.md](docs/release.md).
+
+### One signing key, always
+
+Android lets an update replace an installed app only if both are signed with the same key. An APK that is signed with another key is refused, and the only way forward is to uninstall the app first. Uninstalling removes everything the set-up has built: the assistant role, the permissions, the battery exemption and the "Always" choice for the hearing-aid tap.
+
+The build therefore uses one key for debug and release builds alike:
+
+- If the file `.local/keystore/keystore.properties` exists, the build reads `storeFile`, `storePassword`, `keyAlias` and `keyPassword` from it. `storeFile` is a path relative to the repository root. The `.local` directory is ignored by git.
+- Otherwise it reads the same values from the environment variables `LARA_STOREFILE`, `LARA_STOREPASSWORD`, `LARA_KEYALIAS` and `LARA_KEYPASSWORD`.
+- Otherwise it falls back to the Android debug key of the computer it runs on.
+
+The consequences: a build you make yourself cannot update an APK from the Releases page, and the other way round. The debug APK that the CI workflow builds is signed with a throw-away key and is not offered for download for the same reason. A build made with the debug key of one computer cannot update a build made on another. Decide once which key the installation on your phone uses, and keep it. Never commit a keystore.
+
+### Two things a change must not break
+
+- Never rename, move or disable `trigger.VoiceCommandActivity`. Android then removes the "Always" choice without a word.
+- Keep all three assistant services and their metadata complete. A build that no longer qualifies for the assistant role loses it on installation, and all background rights with it.
+
+`sh tools/check-assistant-metadata.sh` checks both from the source files, without a build. The CI and release workflows run it before they build.
+
+## Debugging toolkit
+
+These are the logcat tags and commands that proved useful while finding out the above. All of them work on a stock phone with USB debugging. Nothing needs root.
+
+```sh
+adb logcat -s LaraJournal HeadsetService ActivityTaskManager AS.AudioDeviceBroker BtScan.ScanManager
+```
+
+| Tag | What to look for |
+|---|---|
+| `LaraJournal` | The app's own journal |
+| `HeadsetService` | The hands-free part of the Bluetooth stack: `startVoiceRecognitionByHeadset` when the tap arrives, `startVoiceRecognition` when an app answers, `isScoAcceptable: rejected SCO` when the audio link is refused |
+| `ActivityTaskManager` | `START u0 {act=android.intent.action.VOICE_COMMAND ... cmp=...}` names the activity that Android started for the tap. `cmp=android/com.android.internal.app.ResolverActivity` means that there was no default and the chooser was opened |
+| `AS.AudioDeviceBroker` | The audio server's routing: which app (by uid) requested or cleared the communication route, and when the route changed |
+| `BtScan.ScanManager` | The Bluetooth scan manager, for the remote. According to the source it logs the scan parameters that are really applied, as `in scan unit=<interval> / <window>` in units of 0.625 ms |
+
+```sh
+adb shell cmd role get-role-holders android.app.role.ASSISTANT
+adb shell cmd package resolve-activity --brief -a android.intent.action.VOICE_COMMAND
+adb shell dumpsys voiceinteraction
+adb shell dumpsys bluetooth_manager
+adb shell dumpsys audio
+adb shell dumpsys media_session
+adb shell device_config list bluetooth
+```
+
+| Command | What it answers |
+|---|---|
+| `cmd role get-role-holders android.app.role.ASSISTANT` | Which package is the digital assistant |
+| `cmd package resolve-activity --brief -a android.intent.action.VOICE_COMMAND` | Which activity a tap would start right now |
+| `dumpsys voiceinteraction` | Whether the assistant's service is the active one and is bound |
+| `dumpsys bluetooth_manager` | The profiles connected to the hearing aid, the state of the hands-free link, the registered BLE scans |
+| `dumpsys audio` | The communication route and who requested it, the audio mode, and in the section "Hardening enforcement" the playback that Android muted |
+| `dumpsys media_session` | The media sessions and who receives media keys |
+| `device_config list bluetooth` | The flags of the Bluetooth stack, among them `scan_allowance_throttling_enabled` |
+
+Two warnings. These outputs contain Bluetooth addresses and device names: remove them before you post a log anywhere. And for measurements after standby the phone must be unplugged, because it does not go into deep sleep on a charger or a USB cable. The journal is stored on the phone for that reason: read it on the app's screen afterwards.
 
 ## Related projects
 
-This project stands on other people's work. If you wear hearing aids and want to build something
-similar, start here. Every repository below was checked through the GitHub API on 27 November 2026.
-Most are young projects by one author. Licences are listed because this code base is Apache-2.0:
-projects marked **ideas only** are GPL or AGPL, so read them, but do not copy from them into
-Apache-licensed code.
+This project stands on other people's work. If you wear hearing aids and want to build something similar, start here.
+
+Every repository below was checked through the GitHub API on 2026-11-27. Most are young projects by one author, tested on that author's own devices. Licences are given because this code base is Apache-2.0. Code under MIT, BSD or Apache-2.0 can be reused with attribution. Projects marked **ideas only** are under GPL or AGPL: read them and learn from them, but do not copy their code into an Apache-2.0 code base. Using such an app as a tool is fine.
 
 ### A button on a hearing aid or headset starts an assistant
 
@@ -383,19 +464,16 @@ The streaming projects in this group use ASHA or LE Audio. The hearing aid used 
 
 ## Roadmap
 
-- [x] Assistant role, hearing-aid tap, voice link, echo test
-- [x] Unprompted announcements, hourly test
-- [ ] Pocket remote: BTHome parsing, background reception, count session, spoken numbers
-- [ ] Measurements: after hours of idle, in the pocket, per scan mode
-- [ ] Media keys as an extra trigger
-- [ ] Spoken menu: weather, appointments, to-dos
-- [ ] Hermes connection, speech recognition, reminders pushed from the agent
-- [ ] Signed releases from CI
+1. Measure the remote: run the count session with each scan setting, at once and after long standby, and decide whether the remote can wake the phone or only navigate.
+2. Media keys as a third input.
+3. The first signed release. The workflow that builds the APK for a version tag is in the repository; no release has been published with it yet.
+4. The spoken menu, with a button layout based on the measurements.
+5. The connection to Hermes: speech recognition, the HTTP interface of the Hermes server, and a channel back for reminders.
+
+Not planned: a release in an app store, support for other phones or hearing aids, and control of the hearing aid itself (volume, programs).
 
 ## Licence
 
-[Apache-2.0](LICENSE).
+Apache License 2.0, see [LICENSE](LICENSE).
 
-This is a private project. It is not affiliated with, endorsed by or supported by Sonova or
-Phonak, Shelly, Google or Nous Research. It is not a medical device, and it does not change
-anything about how a hearing aid amplifies sound.
+This project is not affiliated with, endorsed by or supported by Sonova or Phonak, Shelly, Google or Nous Research. Product names are trademarks of their owners. The app is not a medical device and does not change how the hearing aid works.
