@@ -10,6 +10,8 @@ import io.github.domicc.lara.audio.HeadsetLink
 import io.github.domicc.lara.audio.HearingAidStore
 import io.github.domicc.lara.audio.SessionService
 import io.github.domicc.lara.journal.Journal
+import io.github.domicc.lara.shelly.ShellyLive
+import io.github.domicc.lara.shelly.ShellyStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -29,6 +31,12 @@ class LaraApp : Application() {
     lateinit var announcer: Announcer
         private set
 
+    lateinit var shelly: ShellyStore
+        private set
+
+    lateinit var shellyLive: ShellyLive
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -36,6 +44,8 @@ class LaraApp : Application() {
         hearingAid = HearingAidStore(this)
         headset = HeadsetLink(this, journal, hearingAid)
         announcer = Announcer(this, journal, headset)
+        shelly = ShellyStore(this, journal)
+        shellyLive = ShellyLive(this, journal, shelly)
         journal.log(
             "process_start",
             mapOf(
