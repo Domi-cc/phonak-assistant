@@ -38,7 +38,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
-import io.github.domicc.lara.core.version.BuildLabel
 import io.github.domicc.lara.shelly.ListenerService
 import io.github.domicc.lara.ui.CountersSection
 import io.github.domicc.lara.ui.HearingAidDialog
@@ -158,7 +157,7 @@ private fun MainScreen(lifecycle: Lifecycle) {
         )
         // which build is on the phone: the owner names it when he reports a test
         Text(
-            BuildLabel.line(BuildConfig.VERSION_CODE, BuildConfig.VERSION_NAME, BuildConfig.GIT_COMMIT, BuildConfig.GIT_CHANGED),
+            BuildInfo.label,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -281,7 +281,7 @@ compileSdk 37.2, minSdk 36, targetSdk 36 (switch with `-Plara.targetSdk=37`).
 
 | Path | What |
 |---|---|
-| `core/` | pure Kotlin, no Android imports: journal format, BTHome parser, press tracking with loss counting, routing decisions, count logic, adb parameters; 216 JVM tests |
+| `core/` | pure Kotlin, no Android imports: journal format, BTHome parser, press tracking with loss counting, routing decisions, count logic, adb parameters; 222 JVM tests |
 | `app/…/trigger` | the invisible activity that receives the hearing-aid tap |
 | `app/…/assistant` | the three services that make the app a digital assistant |
 | `app/…/input` | the router that turns every trigger into an action, and the tap setting |

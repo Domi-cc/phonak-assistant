@@ -36,13 +36,20 @@ val gitCommit: String = runCatching {
         .standardOutput.asText.get().trim()
 }.getOrNull().orEmpty()
 val gitChanged: Boolean = runCatching {
-    providers.exec { commandLine("git", "status", "--porcelain") }
+    // --no-optional-locks: only look. Without it git rewrites its index on every Gradle run
+    // and can get in the way of a commit that runs at the same moment.
+    providers.exec { commandLine("git", "--no-optional-locks", "status", "--porcelain") }
         .standardOutput.asText.get().isNotBlank()
 }.getOrDefault(false)
 
 // 36 keeps Android 17's background-audio rules at the lenient level. Build with
 // -Plara.targetSdk=37 to test the strict level.
-val laraTargetSdk = ((findProperty("lara.targetSdk") as String?) ?: "36").toInt()
+val usualTargetSdk = 36
+val laraTargetSdk = (findProperty("lara.targetSdk") as String?)?.toInt() ?: usualTargetSdk
+
+// Shown in the app next to the build number: such a build has the number and the commit of
+// the usual build of that commit, and behaves differently.
+val buildNote = if (laraTargetSdk != usualTargetSdk) "targetSdk $laraTargetSdk" else ""
 
 // -Plara.compressDex=true packs the code compressed into the APK: about 14 MB instead of 33.
 // For an APK that has to pass a size limit on its way to the phone (a chat, a mail). Android
@@ -67,6 +74,7 @@ android {
         versionName = laraVersionName
         buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
         buildConfigField("boolean", "GIT_CHANGED", gitChanged.toString())
+        buildConfigField("String", "BUILD_NOTE", "\"$buildNote\"")
     }
 
     signingConfigs {

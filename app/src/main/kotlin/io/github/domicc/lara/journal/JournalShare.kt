@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.FileProvider
+import io.github.domicc.lara.BuildInfo
 import java.io.File
 
 /**
@@ -39,7 +40,9 @@ object JournalShare {
             context.startActivity(Intent.createChooser(send, "Protokoll teilen"))
             journal.log(
                 "journal_shared",
-                mapOf("files" to existing.map { it.name }, "bytes" to existing.sumOf { it.length() }, "origin" to "screen"),
+                // with the build, so that a shared file names it close to its end as well
+                mapOf("files" to existing.map { it.name }, "bytes" to existing.sumOf { it.length() }, "origin" to "screen") +
+                    BuildInfo.fields,
             )
             true
         } catch (e: Exception) {

@@ -60,7 +60,7 @@ paths above take through the code:
 - The count session (running numbers instead of words) is a measurement tool he did not ask for. It stays available for series, from the screen and over adb, but it is never what a tap or a press starts by default.
 - The hearing aid is chosen once, by him, on the screen; the remote is searched and picked on the screen. Addresses are shown shortened there.
 - The signing key lives in GitHub Actions secrets; GitHub builds the signed APKs. The key is not copied to other machines.
-- The app shows its build number, and every APK he gets has a higher one than the last. He tests without a computer next to him and names the build when he reports.
+- The app shows its build number, and every APK he gets has a higher one than the last. He tests without a computer next to him and names the build when he reports. How that is kept: "Build, install, release" below.
 - He likes fast iterations with something to try on the phone, and short status messages in German.
 
 ## Rules learned the hard way (do not break them)
@@ -103,10 +103,19 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
   `org.jetbrains.kotlin.android` plugin. `compileSdk` is 37.2 (`release(37) { minorApiLevel = 2 }`),
   `minSdk` 36, `targetSdk` 36 (`-Plara.targetSdk=37` for the strict Android 17 audio rules).
 - `versionCode` is the number of commits, locally and in CI, so later builds install over earlier ones.
-  It is the build number the app shows at the top of its screen ("Build 18 · 0.1.0-dev · 9a1591f")
-  and writes into `process_start`. **Commit before you build an APK that goes to the phone**: only
-  a commit raises the number. A build from uncommitted changes shows "Build 18+ … geändert" and
-  must not be handed over.
+  It is the build number the app shows at the top of its screen ("Build 18 · 0.1.0-dev · 9ff1cad").
+  The journal carries it as `versionCode`, with `commit` and `uncommitted`, in `process_start` and
+  in the first line of every day file (`journal_day`).
+- **Every APK the owner gets has a higher build number than the one before.** The number only
+  follows the commit count, so this is a rule for whoever builds:
+  - Commit, then build. A build from uncommitted changes shows "Build 18+ … geändert" and is not
+    handed over. One APK per commit (a build with `-Plara.targetSdk=37` says so in its line).
+  - When an APK goes to him, tag its commit `apk/<number>` and push the tag. `git tag -l 'apk/*'`
+    is the record of what he has had. The next APK is built from a commit that contains the
+    newest of these tags; then its number is higher.
+  - A commit with an `apk/` tag is final: no amend, no rebase, no squash. A correction is a new commit.
+  - Merge pull requests with a merge commit. A squash lowers the commit count, and Android
+    refuses to install a lower `versionCode` over a higher one.
 - An APK sent through the chat has to stay under 30 MiB: build with `-Plara.compressDex=true`.
 - **Without the key** (any machine but the owner's desktop): a local build is signed with a debug
   key and **cannot** replace the installed app. Push the branch and let GitHub build it:
@@ -138,7 +147,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 | Path | What |
 |---|---|
-| `core/` | pure Kotlin, 216 JVM tests: journal format and names, BTHome parser, press tracking with loss counting, input model, routing (`Routing`, `WaitingInputs`), count logic, scan settings and start budget, adb parameters, day statistics, WAV reading, resampling, silence trimming |
+| `core/` | pure Kotlin, 222 JVM tests: build label, journal format and names, BTHome parser, press tracking with loss counting, input model, routing (`Routing`, `WaitingInputs`), count logic, scan settings and start budget, adb parameters, day statistics, WAV reading, resampling, silence trimming |
 | `app/…/trigger` | the invisible activity for the hearing-aid tap; hands the voice button of other devices on |
 | `app/…/assistant` | the three assistant services; `onReady` starts the listener and warms the phrases |
 | `app/…/input` | `InputRouter` (the only caller of `SessionService.start`), `TapStore` |

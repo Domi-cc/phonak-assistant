@@ -3,6 +3,7 @@ package io.github.domicc.lara.journal
 import android.content.Context
 import android.os.SystemClock
 import android.util.Log
+import io.github.domicc.lara.BuildInfo
 import io.github.domicc.lara.core.journal.JournalCodec
 import io.github.domicc.lara.core.journal.JournalRecord
 import io.github.domicc.lara.core.journal.JournalTail
@@ -29,6 +30,9 @@ class Journal(private val context: Context) {
     private val lock = Any()
     private val recentRecords = MutableStateFlow(loadTail())
 
+    /** The name of the day file that is known to begin with its `journal_day` line. Guarded by [lock]. */
+    private var begunFile: String? = null
+
     /** The newest records, oldest first, for the screen; without the types in [NOT_ON_SCREEN]. */
     val recent: StateFlow<List<JournalRecord>> = recentRecords.asStateFlow()
 
@@ -45,7 +49,21 @@ class Journal(private val context: Context) {
         Log.i(TAG, line)
         synchronized(lock) {
             try {
-                fileOf(record.wallMs).appendText(line + "\n")
+                val file = fileOf(record.wallMs)
+                // Every day file begins with a line that says which build writes it. The owner
+                // shares single days, and the process that wrote `process_start` may have been
+                // started on an earlier one.
+                if (file.name != begunFile) {
+                    if (file.length() == 0L) {
+                        val first = record.copy(type = DAY_START, fields = BuildInfo.fields)
+                        val firstLine = JournalCodec.encode(first)
+                        Log.i(TAG, firstLine)
+                        file.appendText(firstLine + "\n")
+                        recentRecords.value = (recentRecords.value + first).takeLast(KEEP_IN_MEMORY)
+                    }
+                    begunFile = file.name
+                }
+                file.appendText(line + "\n")
             } catch (e: IOException) {
                 Log.e(TAG, "journal write failed", e)
             }
@@ -93,6 +111,9 @@ class Journal(private val context: Context) {
     private companion object {
         const val TAG = "LaraJournal"
         const val KEEP_IN_MEMORY = 300
+
+        /** The type of the first line of every day file: which build writes it. */
+        const val DAY_START = "journal_day"
 
         /** Lines have a few hundred bytes each, so this holds [KEEP_IN_MEMORY] of them several times over. */
         const val TAIL_BYTES = 512 * 1024L

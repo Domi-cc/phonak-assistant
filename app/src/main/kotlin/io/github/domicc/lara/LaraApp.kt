@@ -114,15 +114,11 @@ class LaraApp : Application() {
         router = InputRouter(this).also { it.start() }
         journal.log(
             "process_start",
-            mapOf(
+            // first which build of the app this is, then which Android it runs on
+            BuildInfo.fields + mapOf(
                 "pid" to Process.myPid(),
-                "version" to BuildConfig.VERSION_NAME,
-                // the build number the screen shows, and the commit behind it
-                "versionCode" to BuildConfig.VERSION_CODE,
-                "commit" to BuildConfig.GIT_COMMIT,
-                "changed" to BuildConfig.GIT_CHANGED,
                 "targetSdk" to applicationInfo.targetSdkVersion,
-                "build" to Build.ID,
+                "androidBuild" to Build.ID,
                 "sdkFull" to Build.VERSION.SDK_INT_FULL,
                 "btModule" to bluetoothModule(),
                 // what the loss count of the first event of the remote is measured against

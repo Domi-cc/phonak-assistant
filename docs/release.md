@@ -93,7 +93,9 @@ Never move a published tag. If a release is bad, fix it and tag the next patch v
 - `versionCode` is the number of commits up to the built commit (`git rev-list --count HEAD`). Local builds, branch builds and releases all follow this rule, so a build of a later commit always installs over a build of an earlier one. Android refuses the other direction.
 - A suffix such as `v0.2.0-rc1` makes a pre-release. Pre-releases do not count as "latest".
 - A branch build started by hand gets the `versionName` `0.0.0-<branch>.<commit>`.
-- The app shows all of this at the top of its screen and in the `process_start` line of its journal: "Build 18 · 0.1.0-dev · 9a1591f" is versionCode, versionName and the commit. A build made from files that differ from that commit says "Build 18+ … geändert": it has the number of the commit without being it. Commit first, then build, and every APK has a number of its own.
+- The app shows all of this at the top of its screen: "Build 18 · 0.1.0-dev · 9ff1cad" is `versionCode`, `versionName` and the commit. The journal has the same as `versionCode`, `version`, `commit` and `uncommitted` in its `process_start` line and in the first line of every day file (`journal_day`); `androidBuild` there is the build of Android, not of the app.
+- A build made from files that differ from its commit says "Build 18+ … geändert": it has the number of the commit without being it. A build with `-Plara.targetSdk=37` adds "targetSdk 37".
+- The count only rises with a new commit on top. Two different commits can have the same count: an amended or rebased commit keeps it, a squash merge lowers it, another branch has its own. So for APKs that go to the phone: commit first, tag the commit `apk/<number>` and push the tag, never rewrite a tagged commit, build the next APK from a commit that contains the newest `apk/` tag, and merge pull requests with a merge commit.
 
 ## When the job fails
 
