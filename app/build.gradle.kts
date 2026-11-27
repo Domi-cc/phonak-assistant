@@ -31,6 +31,11 @@ val laraVersionCode = (findProperty("lara.versionCode") as String?)?.toInt() ?: 
 // -Plara.targetSdk=37 to test the strict level.
 val laraTargetSdk = ((findProperty("lara.targetSdk") as String?) ?: "36").toInt()
 
+// -Plara.compressDex=true packs the code compressed into the APK: about 14 MB instead of 33.
+// For an APK that has to pass a size limit on its way to the phone (a chat, a mail). Android
+// unpacks the code when it installs the app; the app itself is the same.
+val laraCompressDex = (findProperty("lara.compressDex") as String?) == "true"
+
 android {
     namespace = "io.github.domicc.lara"
 
@@ -82,6 +87,12 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    packaging {
+        dex {
+            useLegacyPackaging = laraCompressDex
+        }
     }
 
     lint {

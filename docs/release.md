@@ -107,3 +107,15 @@ Each failure names its reason as an error annotation on the run.
 | Wrong signing key, Wrong version in APK | `app/build.gradle.kts` no longer reads the `LARA_*` variables or the `lara.versionName` and `lara.versionCode` properties the workflow passes. |
 
 If the job stops with "a release with the same tag name already exists", delete that release (`gh release delete <tag>`, the tag stays) and re-run the job.
+
+## A smaller APK for sending around
+
+The debug APK is about 33 MB, because Android wants the code stored uncompressed. For a
+channel with a size limit, build it compressed (about 14 MB):
+
+```sh
+./gradlew :app:assembleDebug -Plara.compressDex=true
+```
+
+Same app, same key, installs over every other build. Android unpacks the code at install
+time. The builds from GitHub do not use this option.
