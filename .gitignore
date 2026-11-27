@@ -1,0 +1,17 @@
+# build output
+build/
+.gradle/
+.kotlin/
+*.apk
+*.aab
+
+# machine-specific
+local.properties
+.idea/
+*.iml
+
+# private: research notes, device captures, signing key (never commit)
+.local/
+*.jks
+*.keystore
+keystore.properties
