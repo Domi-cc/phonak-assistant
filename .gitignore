@@ -1,5 +1,7 @@
-# build output
-build/
+# build output: the build folder of the project and of each module, and nothing below that.
+# A plain "build/" would also hide a source package of that name, without a word.
+/build/
+/*/build/
 .gradle/
 .kotlin/
 *.apk

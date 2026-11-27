@@ -93,6 +93,7 @@ Never move a published tag. If a release is bad, fix it and tag the next patch v
 - `versionCode` is the number of commits up to the built commit (`git rev-list --count HEAD`). Local builds, branch builds and releases all follow this rule, so a build of a later commit always installs over a build of an earlier one. Android refuses the other direction.
 - A suffix such as `v0.2.0-rc1` makes a pre-release. Pre-releases do not count as "latest".
 - A branch build started by hand gets the `versionName` `0.0.0-<branch>.<commit>`.
+- The app shows all of this at the top of its screen and in the `process_start` line of its journal: "Build 18 · 0.1.0-dev · 9a1591f" is versionCode, versionName and the commit. A build made from files that differ from that commit says "Build 18+ … geändert": it has the number of the commit without being it. Commit first, then build, and every APK has a number of its own.
 
 ## When the job fails
 

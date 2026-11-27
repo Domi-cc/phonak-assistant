@@ -60,6 +60,7 @@ paths above take through the code:
 - The count session (running numbers instead of words) is a measurement tool he did not ask for. It stays available for series, from the screen and over adb, but it is never what a tap or a press starts by default.
 - The hearing aid is chosen once, by him, on the screen; the remote is searched and picked on the screen. Addresses are shown shortened there.
 - The signing key lives in GitHub Actions secrets; GitHub builds the signed APKs. The key is not copied to other machines.
+- The app shows its build number, and every APK he gets has a higher one than the last. He tests without a computer next to him and names the build when he reports.
 - He likes fast iterations with something to try on the phone, and short status messages in German.
 
 ## Rules learned the hard way (do not break them)
@@ -102,6 +103,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
   `org.jetbrains.kotlin.android` plugin. `compileSdk` is 37.2 (`release(37) { minorApiLevel = 2 }`),
   `minSdk` 36, `targetSdk` 36 (`-Plara.targetSdk=37` for the strict Android 17 audio rules).
 - `versionCode` is the number of commits, locally and in CI, so later builds install over earlier ones.
+  It is the build number the app shows at the top of its screen ("Build 18 · 0.1.0-dev · 9a1591f")
+  and writes into `process_start`. **Commit before you build an APK that goes to the phone**: only
+  a commit raises the number. A build from uncommitted changes shows "Build 18+ … geändert" and
+  must not be handed over.
+- An APK sent through the chat has to stay under 30 MiB: build with `-Plara.compressDex=true`.
 - **Without the key** (any machine but the owner's desktop): a local build is signed with a debug
   key and **cannot** replace the installed app. Push the branch and let GitHub build it:
   `gh workflow run release.yml --ref <branch>`, then `gh run download`. See [`docs/release.md`](docs/release.md).

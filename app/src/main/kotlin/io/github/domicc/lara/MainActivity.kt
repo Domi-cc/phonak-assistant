@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import io.github.domicc.lara.core.version.BuildLabel
 import io.github.domicc.lara.shelly.ListenerService
 import io.github.domicc.lara.ui.CountersSection
 import io.github.domicc.lara.ui.HearingAidDialog
@@ -151,9 +152,15 @@ private fun MainScreen(lifecycle: Lifecycle) {
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         Text(
-            "Lara im Ohr · Messmodus   v${BuildConfig.VERSION_NAME}",
+            "Lara im Ohr · Messmodus",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
+        )
+        // which build is on the phone: the owner names it when he reports a test
+        Text(
+            BuildLabel.line(BuildConfig.VERSION_CODE, BuildConfig.VERSION_NAME, BuildConfig.GIT_COMMIT, BuildConfig.GIT_CHANGED),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
             // The sections get what they need, but never so much that the journal disappears.

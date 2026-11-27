@@ -27,6 +27,19 @@ val commitCount: Int? = runCatching {
 }.getOrNull()
 val laraVersionCode = (findProperty("lara.versionCode") as String?)?.toInt() ?: commitCount ?: 1
 
+// What the app shows about itself next to that number (top of the screen, `process_start` in
+// the journal): the commit it was built from, and whether files differed from that commit. A
+// build with uncommitted changes has the versionCode of the commit below it without being
+// that commit, so it must be recognisable. Ignored files (build output, .local) do not count.
+val gitCommit: String = runCatching {
+    providers.exec { commandLine("git", "rev-parse", "--short=7", "HEAD") }
+        .standardOutput.asText.get().trim()
+}.getOrNull().orEmpty()
+val gitChanged: Boolean = runCatching {
+    providers.exec { commandLine("git", "status", "--porcelain") }
+        .standardOutput.asText.get().isNotBlank()
+}.getOrDefault(false)
+
 // 36 keeps Android 17's background-audio rules at the lenient level. Build with
 // -Plara.targetSdk=37 to test the strict level.
 val laraTargetSdk = ((findProperty("lara.targetSdk") as String?) ?: "36").toInt()
@@ -52,6 +65,8 @@ android {
         targetSdk = laraTargetSdk
         versionCode = laraVersionCode
         versionName = laraVersionName
+        buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
+        buildConfigField("boolean", "GIT_CHANGED", gitChanged.toString())
     }
 
     signingConfigs {

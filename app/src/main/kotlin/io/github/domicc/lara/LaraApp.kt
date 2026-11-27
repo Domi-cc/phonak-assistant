@@ -117,6 +117,10 @@ class LaraApp : Application() {
             mapOf(
                 "pid" to Process.myPid(),
                 "version" to BuildConfig.VERSION_NAME,
+                // the build number the screen shows, and the commit behind it
+                "versionCode" to BuildConfig.VERSION_CODE,
+                "commit" to BuildConfig.GIT_COMMIT,
+                "changed" to BuildConfig.GIT_CHANGED,
                 "targetSdk" to applicationInfo.targetSdkVersion,
                 "build" to Build.ID,
                 "sdkFull" to Build.VERSION.SDK_INT_FULL,
