@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.domicc.lara.announce.HourlyAnnouncement
+import io.github.domicc.lara.audio.SessionPrograms
 import io.github.domicc.lara.audio.SessionService
 import io.github.domicc.lara.core.journal.JournalRecord
 import io.github.domicc.lara.ui.SetupItem
@@ -176,6 +177,11 @@ private fun MainScreen() {
                 Text(
                     shellyRemote?.let { "Shelly ${shortAddress(it.address)}: Live-Test" } ?: "Shelly-Fernbedienung anlernen",
                 )
+            }
+            if (shellyRemote != null) {
+                Button(onClick = { SessionService.start(context, "screen", null, SessionPrograms.REMOTE) }) {
+                    Text("Shelly-Sitzung")
+                }
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

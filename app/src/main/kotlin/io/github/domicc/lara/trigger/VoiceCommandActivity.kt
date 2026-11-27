@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import io.github.domicc.lara.LaraApp
+import io.github.domicc.lara.audio.SessionPrograms
 import io.github.domicc.lara.audio.SessionService
 
 /**
@@ -38,7 +39,10 @@ class VoiceCommandActivity : Activity() {
             // The voice button of a car kit or another headset: not ours to answer.
             handOver()
         } else {
-            SessionService.start(this, "tap", device)
+            // With a remote enrolled the tap opens the session in which the remote is heard;
+            // without one it runs the echo test.
+            val program = if (app.shelly.remote.value != null) SessionPrograms.REMOTE else SessionPrograms.ECHO
+            SessionService.start(this, "tap", device, program)
         }
         finish()
     }
