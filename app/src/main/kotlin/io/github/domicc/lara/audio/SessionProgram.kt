@@ -1,5 +1,7 @@
 package io.github.domicc.lara.audio
 
+import io.github.domicc.lara.shelly.RemoteProgram
+
 /**
  * What happens inside one open voice link. The service opens the link (start tone included),
  * runs the program and closes the link with the program's result.
@@ -16,8 +18,11 @@ fun interface SessionProgram {
 object SessionPrograms {
     const val ECHO = "echo"
 
+    /** Sounds for the presses of the Shelly remote while the link is open. */
+    const val REMOTE = "remote"
+
     fun create(name: String?): SessionProgram = when (name) {
-        ECHO -> EchoProgram()
+        REMOTE -> RemoteProgram()
         else -> EchoProgram()
     }
 }

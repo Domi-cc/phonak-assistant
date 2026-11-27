@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher icon, single-colour layer for themed icons; the launcher supplies the colour. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.21"
+        android:scaleY="0.21"
+        android:translateX="4.75"
+        android:translateY="16.1">
+        <path
+            android:pathData="M 176 262 C 146 232 128 190 138 146 C 149 98 196 70 244 80 C 296 92 322 138 310 186 C 302 218 272 228 264 254 C 257 278 264 298 240 306 C 221 312 203 303 196 288"
+            android:strokeColor="#000000"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:strokeWidth="17" />
+        <path
+            android:pathData="M 190 172 C 192 139 216 122 240 127 C 265 132 276 156 267 177 C 261 191 246 196 240 210"
+            android:strokeColor="#000000"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:strokeWidth="17" />
+        <path
+            android:fillColor="#000000"
+            android:pathData="M 311,92 a 11,11 0 1,0 22,0 a 11,11 0 1,0 -22,0" />
+        <path
+            android:pathData="M 296,92 a 26,26 0 1,0 52,0 a 26,26 0 1,0 -52,0"
+            android:strokeColor="#000000"
+            android:strokeWidth="5" />
+    </group>
+</vector>

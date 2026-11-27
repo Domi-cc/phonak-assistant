@@ -49,9 +49,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.domicc.lara.announce.HourlyAnnouncement
+import io.github.domicc.lara.audio.SessionPrograms
 import io.github.domicc.lara.audio.SessionService
 import io.github.domicc.lara.core.journal.JournalRecord
 import io.github.domicc.lara.ui.SetupItem
+import io.github.domicc.lara.ui.ShellyDialog
+import io.github.domicc.lara.ui.shortAddress
 import io.github.domicc.lara.ui.SetupStatus
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
@@ -81,6 +84,8 @@ private fun MainScreen() {
     var items by remember { mutableStateOf(SetupStatus.read(context)) }
     var hourly by remember { mutableStateOf(HourlyAnnouncement.isEnabled(context)) }
     var choosingHearingAid by remember { mutableStateOf(false) }
+    var showingShelly by remember { mutableStateOf(false) }
+    val shellyRemote by app.shelly.remote.collectAsState()
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -105,6 +110,8 @@ private fun MainScreen() {
             )
         }
     }
+
+    if (showingShelly) ShellyDialog(onClose = { showingShelly = false })
 
     if (choosingHearingAid) {
         val devices = app.headset.connectedDevices()
@@ -164,6 +171,18 @@ private fun MainScreen() {
             OutlinedButton(
                 onClick = { app.announcer.announce(HourlyAnnouncement.timeText(System.currentTimeMillis()), "screen") },
             ) { Text("Ansage jetzt") }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { showingShelly = true }) {
+                Text(
+                    shellyRemote?.let { "Shelly ${shortAddress(it.address)}: Live-Test" } ?: "Shelly-Fernbedienung anlernen",
+                )
+            }
+            if (shellyRemote != null) {
+                Button(onClick = { SessionService.start(context, "screen", null, SessionPrograms.REMOTE) }) {
+                    Text("Shelly-Sitzung")
+                }
+            }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
