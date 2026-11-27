@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- For announcements at a set time (hourly test, later reminders). Granted at install. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- Development permission. Has no effect until the owner runs:
+         adb shell pm grant io.github.domicc.lara android.permission.SET_MEDIA_KEY_LISTENER -->
+    <uses-permission
+        android:name="android.permission.SET_MEDIA_KEY_LISTENER"
+        tools:ignore="ProtectedPermissions" />
+
+    <uses-feature android:name="android.hardware.bluetooth" android:required="true" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
+    <!-- Needed to see which app Android would start for the hearing-aid voice button. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VOICE_COMMAND" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".LaraApp"
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        tools:ignore="MissingApplicationIcon">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Input path A: the hearing-aid tap. Android's Bluetooth stack turns the hands-free
+             "voice recognition" request into an activity start with VOICE_COMMAND; the assistant
+             role is not involved in routing it. The owner picks this activity once as "Always".
+             NEVER rename or disable this component: Android silently drops the "Always" choice. -->
+        <activity
+            android:name=".trigger.VoiceCommandActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleInstance"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- The three services below make the app selectable as digital assistant. All three are
+             required: without the recognition service Android clears the assistant setting again.
+             While the system keeps the first one bound, the app may use the microphone and play
+             audio from the background. -->
+        <service
+            android:name=".assistant.LaraVoiceInteractionService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/voice_interaction_service" />
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".assistant.LaraSessionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION" />
+
+        <service
+            android:name=".assistant.LaraRecognitionService"
+            android:exported="true"
+            android:label="@string/app_name"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.speech"
+                android:resource="@xml/recognition_service" />
+        </service>
+
+        <!-- Alarm target for the hourly test announcement. -->
+        <receiver
+            android:name=".announce.HourlyReceiver"
+            android:exported="false" />
+
+        <!-- One spoken interaction with the hearing aid. Runs only while a session is active. -->
+        <service
+            android:name=".audio.SessionService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+    </application>
+</manifest>

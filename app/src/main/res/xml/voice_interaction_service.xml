@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- sessionService, recognitionService and supportsAssist are the minimum for the assistant role. -->
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:recognitionService="io.github.domicc.lara.assistant.LaraRecognitionService"
+    android:sessionService="io.github.domicc.lara.assistant.LaraSessionService"
+    android:settingsActivity="io.github.domicc.lara.MainActivity"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="true"
+    android:supportsLocalInteraction="true" />
