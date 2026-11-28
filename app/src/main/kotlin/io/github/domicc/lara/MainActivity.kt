@@ -82,12 +82,14 @@ class MainActivity : ComponentActivity() {
      * Every time the app comes onto the screen, not only when the activity is created: the
      * permission the listener needs may have been granted in Android's settings in the
      * meantime, and nothing tells the app about that. Costs one journal line if it runs.
-     * The same goes for the permission to read the calendar.
+     * The same goes for the permission to read the calendar, and for the watch of the sound
+     * channels to the hearing aid, which needs the permission for nearby devices too.
      */
     override fun onStart() {
         super.onStart()
         ListenerService.start(this, "main_activity")
         LaraApp.instance.calendar.onScreen()
+        LaraApp.instance.channels.onScreen()
     }
 }
 

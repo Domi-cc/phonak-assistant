@@ -11,10 +11,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import io.github.domicc.lara.LaraApp
+import io.github.domicc.lara.core.stats.ChannelTexts
 import io.github.domicc.lara.core.stats.DayStats
 
-/** For the folded counters: the two numbers a measurement is about. */
-fun countersSummary(stats: DayStats): String = "Shelly ${stats.shellyEvents} · Lücken ${stats.shellyMissed}"
+/**
+ * For the folded counters: the two numbers a measurement of the remote is about, and how long
+ * a sound channel to the hearing aid was open today.
+ */
+fun countersSummary(stats: DayStats): String =
+    "Shelly ${stats.shellyEvents} · Lücken ${stats.shellyMissed} · ${ChannelTexts.summary(stats)}"
 
 /**
  * Today's numbers, counted from the journal (see [io.github.domicc.lara.journal.DayCounters]).
@@ -31,9 +36,14 @@ fun CountersSection() {
         "Sitzungen",
         "${stats.sessionsOk} ok · ${stats.sessionsCancelled} abgebrochen · ${stats.sessionsFailed} fehlgeschlagen",
     )
+    // how long a sound channel to the hearing aid was open, and how much of that was this app's
+    CounterRow("Musik-Kanal zum Hörgerät", ChannelTexts.media(stats))
+    CounterRow("Sprach-Kanal", ChannelTexts.voice(stats))
     Text(
         "Aus dem Protokoll von heute gezählt. „Lücken“ sind fehlende Paketnummern des Shelly: meist ein verlorener Druck, " +
-            "manchmal nur seine Bake oder ein Neustart des Shelly. Simulierte Drücke zählen nicht.",
+            "manchmal nur seine Bake oder ein Neustart des Shelly. Simulierte Drücke zählen nicht. " +
+            "Kanäle: wie oft und wie lange wirklich ein Ton-Kanal zum Hörgerät offen war, gezählt, sobald er wieder zu ist. " +
+            "„App“: während einer Ansage dieser App. „anderes“: Töne des Telefons und anderer Apps, beim Sprach-Kanal Telefonate.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 2.dp),

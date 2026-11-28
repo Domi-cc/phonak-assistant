@@ -46,6 +46,9 @@ import java.util.Locale
  *
  * Speech comes from the phone's text-to-speech engine. Its audio is played by the engine's own
  * process, which is fine here because no voice link has to be kept alive.
+ *
+ * The same checks and the same guard serve the silence test ([playSilence]), which opens the
+ * media channel with nothing audible in it.
  */
 class Announcer(
     private val context: Context,
@@ -61,6 +64,24 @@ class Announcer(
         .setUsage(AudioAttributes.USAGE_ASSISTANT)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
+
+    /**
+     * The reason of the announcement that plays right now, from its first sound to its end;
+     * null while none plays. Only to be read: with it and [lastEnded] the watch of the sound
+     * channels ([io.github.domicc.lara.audio.AidChannels]) tells a media stream this app
+     * opened from a sound of the phone.
+     */
+    @Volatile
+    var playing: String? = null
+        private set
+
+    /** The announcement that ended last; null if none has played in this process. */
+    @Volatile
+    var lastEnded: Ended? = null
+        private set
+
+    /** @param elapsedMs when it ended, on the elapsed-realtime clock */
+    class Ended(val reason: String, val elapsedMs: Long)
 
     /**
      * Speaks [text]. [reason] says who asked (for example "hourly" or "screen") and is journaled.
@@ -133,6 +154,7 @@ class Announcer(
         val done = CompletableDeferred<String>()
         val guard = OutputGuard(aid.address, stopIf) { why -> if (done.complete(why)) tts.stop() }
         try {
+            playing = reason
             guard.start()
             // The chime opens the stream to the hearing aid, so that the speech is not clipped.
             playChime(output, done)
@@ -165,8 +187,83 @@ class Announcer(
             if (result == "timeout") tts.stop()
             journal.log("announce_end", mapOf("reason" to reason, "result" to result, "ms" to ms()))
         } finally {
+            ended(reason)
             guard.stop()
             audio.abandonAudioFocusRequest(focus)
+        }
+    }
+
+    private fun ended(reason: String) {
+        playing = null
+        lastEnded = Ended(reason, SystemClock.elapsedRealtime())
+    }
+
+    /**
+     * Plays [ms] of pure silence into the hearing aid over the media channel: a test for the
+     * ear. Android opens the media stream for silence like for any sound, so the wearer can
+     * tell whether the surroundings change although nothing is audible. That shows whether
+     * the hearing aid reacts to the stream itself or only to sound in it, and so whether the
+     * silent seconds Android adds after every announcement cost hearing at all.
+     *
+     * It keeps the rules of an announcement: the same checks before (a hearing aid is
+     * selected, connected and the only output), the same guard while it plays, one at a
+     * time with the announcements, and `announce_start` and `announce_end` in the journal,
+     * here with `silence=true`. Left out are the chime, the speech engine and the request
+     * for the audio focus: nothing is to be heard, so no other sound may be turned down
+     * for it.
+     *
+     * @param reason who asked, as for [announce]
+     */
+    fun playSilence(ms: Int, reason: String) {
+        val wakeLock = context.getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "lara:announce")
+            .apply { acquire(ms + 10_000L) }
+        scope.launch {
+            try {
+                oneAtATime.withLock { silence(ms, reason) }
+            } catch (e: Exception) {
+                journal.log("announce_error", mapOf("reason" to reason, "exception" to e.toString()))
+            } finally {
+                if (wakeLock.isHeld) wakeLock.release()
+            }
+        }
+    }
+
+    private suspend fun silence(ms: Int, reason: String) {
+        val startedAt = SystemClock.elapsedRealtime()
+        fun skipped(why: String, more: Map<String, Any?> = emptyMap()) =
+            journal.log("announce_skipped", mapOf("reason" to reason, "why" to why) + more)
+
+        // The questions [speak] asks before its first sound, word for word. Silence that came
+        // out of the phone's speaker would harm nobody, but the test would then say nothing
+        // about the hearing aid.
+        if (headsetLink.store.address == null) return skipped("no_hearing_aid_selected")
+        val headset = headsetLink.await(2_000)
+        val aid = headset?.let { headsetLink.hearingAid(it) } ?: return skipped("hearing_aid_not_connected")
+        val outputs = outputs()
+        if (!onlyTheAid(outputs, aid.address)) {
+            return skipped("output_is_not_the_hearing_aid", mapOf("outputTypes" to outputs.map { it.type }))
+        }
+        journal.log(
+            "announce_start",
+            // musicActive: other media was playing already, so the stream was open anyway
+            mapOf("reason" to reason, "silence" to true, "durationMs" to ms, "musicActive" to audio.isMusicActive),
+        )
+        val done = CompletableDeferred<String>()
+        val guard = OutputGuard(aid.address, null) { why -> done.complete(why) }
+        try {
+            playing = reason
+            guard.start()
+            play(Tones.silence(ms), outputs.first(), done)
+            // completed only by the guard: then the output changed on the way
+            val result = if (done.isCompleted) done.await() else "ok"
+            journal.log(
+                "announce_end",
+                mapOf("reason" to reason, "silence" to true, "result" to result, "ms" to SystemClock.elapsedRealtime() - startedAt),
+            )
+        } finally {
+            ended(reason)
+            guard.stop()
         }
     }
 
@@ -254,8 +351,14 @@ class Announcer(
      * @param stop ends the chime early: the stream is tied to [output], but if that device
      * goes away Android plays the rest wherever it likes
      */
-    private suspend fun playChime(output: AudioDeviceInfo, stop: CompletableDeferred<String>) {
-        val pcm = Tones.silence(STREAM_WARM_UP_MS) + Tones.tone(659.0, 160, volume = 0.25) + Tones.silence(120)
+    private suspend fun playChime(output: AudioDeviceInfo, stop: CompletableDeferred<String>) =
+        play(Tones.silence(STREAM_WARM_UP_MS) + Tones.tone(659.0, 160, volume = 0.25) + Tones.silence(120), output, stop)
+
+    /**
+     * Plays [pcm] on [output], by this app, and returns when it is through or [stop] is
+     * completed. What the chime is played with, and the silence of the silence test.
+     */
+    private suspend fun play(pcm: ShortArray, output: AudioDeviceInfo, stop: CompletableDeferred<String>) {
         val track = AudioTrack.Builder()
             .setAudioAttributes(attributes)
             .setAudioFormat(

@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Process
 import io.github.domicc.lara.announce.Announcer
 import io.github.domicc.lara.announce.HourlyAnnouncement
+import io.github.domicc.lara.audio.AidChannels
 import io.github.domicc.lara.audio.HeadsetLink
 import io.github.domicc.lara.audio.HearingAidStore
 import io.github.domicc.lara.audio.SessionService
@@ -22,6 +23,7 @@ import io.github.domicc.lara.shelly.ShellyStore
 import io.github.domicc.lara.speech.CountSounds
 import io.github.domicc.lara.speech.PromptCache
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -43,6 +45,13 @@ class LaraApp : Application() {
 
     /** Unprompted speech over the media channel. */
     lateinit var announcer: Announcer
+        private set
+
+    /**
+     * Journals when a sound channel to the hearing aid is really open, whoever opened it, and
+     * looks after a voice link that stays up after its session.
+     */
+    lateinit var channels: AidChannels
         private set
 
     /** The spoken phrases for the voice link, made ahead of time. */
@@ -114,6 +123,7 @@ class LaraApp : Application() {
         hearingAid = HearingAidStore(this)
         headset = HeadsetLink(this, journal, hearingAid)
         announcer = Announcer(this, journal, headset)
+        channels = AidChannels(this, journal, headset, announcer)
         prompts = PromptCache(this, journal)
         countSounds = CountSounds(prompts)
         shellyStore = ShellyStore(this, journal)
@@ -139,9 +149,18 @@ class LaraApp : Application() {
             ),
         )
         headset.connect()
+        channels.start()
+        // From here on, because a day file that this process start begins gets the line
+        // `aid_channels_watching` or `aid_channels_no_permission` anyway. Later days have
+        // neither: the process lives on, and the owner shares single days.
+        journal.dayFields = { mapOf("aidChannelsWatching" to channels.watching) }
         HourlyAnnouncement.ensureScheduled(this)
         calendar.start()
-        CoroutineScope(Dispatchers.Default).launch { SessionService.recoverAfterCrash(this@LaraApp) }
+        // Undispatched: the recovery reads its flag here and now, before any session of this
+        // process can set it, and only then goes on to another thread to wait.
+        CoroutineScope(Dispatchers.Default).launch(start = CoroutineStart.UNDISPATCHED) {
+            SessionService.recoverAfterCrash(this@LaraApp)
+        }
     }
 
     /** Why the previous process of this app ended; explains gaps in the journal. */

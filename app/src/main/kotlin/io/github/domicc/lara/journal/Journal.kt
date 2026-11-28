@@ -33,6 +33,15 @@ class Journal(private val context: Context) {
     /** The name of the day file that is known to begin with its `journal_day` line. Guarded by [lock]. */
     private var begunFile: String? = null
 
+    /**
+     * What the first line of a day file says besides the build: state that is journaled once
+     * per process and that the reader of a single day still has to know, because a process
+     * lives for days. Set once at process start. Called from whatever thread writes the
+     * first line of a day, inside the journal's lock: it must be quick and must not log.
+     */
+    @Volatile
+    var dayFields: () -> Map<String, Any?> = { emptyMap() }
+
     /** The newest records, oldest first, for the screen; without the types in [NOT_ON_SCREEN]. */
     val recent: StateFlow<List<JournalRecord>> = recentRecords.asStateFlow()
 
@@ -52,10 +61,10 @@ class Journal(private val context: Context) {
                 val file = fileOf(record.wallMs)
                 // Every day file begins with a line that says which build writes it. The owner
                 // shares single days, and the process that wrote `process_start` may have been
-                // started on an earlier one.
+                // started on an earlier one. For the same reason it carries [dayFields].
                 if (file.name != begunFile) {
                     if (file.length() == 0L) {
-                        val first = record.copy(type = DAY_START, fields = BuildInfo.fields)
+                        val first = record.copy(type = DAY_START, fields = BuildInfo.fields + dayFields())
                         val firstLine = JournalCodec.encode(first)
                         Log.i(TAG, firstLine)
                         file.appendText(firstLine + "\n")
@@ -112,7 +121,7 @@ class Journal(private val context: Context) {
         const val TAG = "LaraJournal"
         const val KEEP_IN_MEMORY = 300
 
-        /** The type of the first line of every day file: which build writes it. */
+        /** The type of the first line of every day file: which build writes it, and [dayFields]. */
         const val DAY_START = "journal_day"
 
         /** Lines have a few hundred bytes each, so this holds [KEEP_IN_MEMORY] of them several times over. */

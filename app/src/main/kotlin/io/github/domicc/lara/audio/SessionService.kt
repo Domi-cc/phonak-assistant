@@ -19,6 +19,7 @@ import android.os.SystemClock
 import io.github.domicc.lara.LaraApp
 import io.github.domicc.lara.R
 import io.github.domicc.lara.core.journal.JournalNames
+import io.github.domicc.lara.input.InputRouter
 import io.github.domicc.lara.shelly.ListenerService
 import io.github.domicc.lara.speech.SessionPhrases
 import kotlinx.coroutines.CancellationException
@@ -31,9 +32,12 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Foreground service (type microphone) that runs one audio session with the hearing aid and
@@ -50,6 +54,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  * session is completely over: closing phrase said, link closed, and the hands-free audio of
  * the hearing aid really down ([awaitLinkDown]). A trigger in that time is turned down as
  * `session_busy` ([busyHandler]). Every session that is over is reported through [endHandler].
+ *
+ * If that audio is still up when the wait for it runs out, the service is freed all the same
+ * and the link is handed to a follow-up outside the session ([AidChannels.followStuckLink]):
+ * while it is up the hearing aid stays in a streaming program instead of its hearing program.
  */
 class SessionService : Service() {
 
@@ -69,16 +77,29 @@ class SessionService : Service() {
     @Volatile
     private var endedByTap = false
 
-    /** Journals link changes and ends the session when the hearing aid closes the link. */
+    /**
+     * Ends the session when the hearing aid closes the link or is tapped a second time. The
+     * line `hfp_audio_state` for a change of the link is written by [AidChannels], which
+     * hears of it all day and not only while this service exists.
+     */
     private val linkReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val journal = LaraApp.instance.journal
             when (intent.action) {
                 BluetoothHeadset.ACTION_AUDIO_STATE_CHANGED -> {
                     val state = intent.getIntExtra(BluetoothProfile_EXTRA_STATE, -1)
-                    journal.log("hfp_audio_state", mapOf("state" to audioStateName(state)))
                     if (state == BluetoothHeadset.STATE_AUDIO_CONNECTED) linkWasUp = true
-                    if (state == BluetoothHeadset.STATE_AUDIO_DISCONNECTED && linkWasUp) session?.cancel()
+                    if (state == BluetoothHeadset.STATE_AUDIO_DISCONNECTED && linkWasUp) {
+                        // This receiver has always acted on the report of any hands-free
+                        // device, and [AidChannels] journals the reports about the selected
+                        // hearing aid only. Without this line a session that another
+                        // device's report ends would read "cancelled" with nothing next to it.
+                        val device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                        if (session != null && !LaraApp.instance.hearingAid.isSelected(device)) {
+                            journal.log("session_interrupted", mapOf("why" to "hfp_audio_other_device"))
+                        }
+                        session?.cancel()
+                    }
                 }
                 ACTION_STOP_VOICE_COMMAND -> {
                     // a second tap on the hearing aid during a session
@@ -103,6 +124,8 @@ class SessionService : Service() {
 
     @OptIn(DelicateCoroutinesApi::class) // CoroutineStart.ATOMIC, see where the session is launched
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // this start has arrived; the count never falls below zero, whatever Android delivers
+        startsPending.updateAndGet { if (it > 0) it - 1 else 0 }
         lastStartId = startId
         val app = LaraApp.instance
         val trigger = intent?.getStringExtra(EXTRA_TRIGGER) ?: "unknown"
@@ -176,9 +199,17 @@ class SessionService : Service() {
                         // The program has stopped listening. The listener takes the scan out of
                         // its session mode a little later by itself, see setSessionOpen.
                         if (listens) ListenerService.setSessionOpen(false)
+                        // For the follow-up of a link that stays up: a report that the link
+                        // went down at any moment from here on means that whatever is up
+                        // afterwards is not this session's.
+                        val closingAt = SystemClock.elapsedRealtime()
                         link.close(result, app.prompts.get(SessionPhrases.END))
                         markOpen(this@SessionService, false)
-                        awaitLinkDown(app, link)
+                        // Handed over, not waited for: the follow-up looks again for half a
+                        // minute, and the service has to be free for the next tap at once.
+                        // Whether the audio that is up is this session's own link, and
+                        // whether one more stop can help, the follow-up decides.
+                        if (awaitLinkDown(app, link)) app.channels.followStuckLink(closingAt, link.voiceRecognitionStopped)
                     } finally {
                         // Read before the service is free: the next session resets the flag.
                         val sayOverMedia = result == JournalNames.RESULT_CANCELLED && endedByTap
@@ -234,13 +265,6 @@ class SessionService : Service() {
             .build()
     }
 
-    private fun audioStateName(state: Int): String = when (state) {
-        BluetoothHeadset.STATE_AUDIO_CONNECTED -> "connected"
-        BluetoothHeadset.STATE_AUDIO_CONNECTING -> "connecting"
-        BluetoothHeadset.STATE_AUDIO_DISCONNECTED -> "disconnected"
-        else -> state.toString()
-    }
-
     companion object {
         private const val EXTRA_TRIGGER = "trigger"
         private const val EXTRA_PROGRAM = "program"
@@ -265,6 +289,13 @@ class SessionService : Service() {
         @Volatile
         var busy: Boolean = false
             private set
+
+        /**
+         * Sessions that were asked for with [start] and that Android has not handed to the
+         * service yet. Only [recoverAfterCrash] asks: in that time a tap may be waiting for
+         * its answer, and nothing may be stopped next to it.
+         */
+        private val startsPending = AtomicInteger()
         private const val CHANNEL_ID = "session"
         private const val NOTIFICATION_ID = 1
         /** No session may last longer than this, whatever its program does. */
@@ -276,6 +307,7 @@ class SessionService : Service() {
         private const val AFTER_TAP_MS = 500L
         private const val LINK_DOWN_TIMEOUT_MS = 1_500L
         private const val LINK_DOWN_POLL_MS = 20L
+        private const val RECOVERY_PROXY_MS = 5_000L
         private const val ACTION_STOP_VOICE_COMMAND = "android.intent.action.STOP_VOICE_COMMAND"
         private const val BluetoothProfile_EXTRA_STATE = "android.bluetooth.profile.extra.STATE"
 
@@ -297,19 +329,108 @@ class SessionService : Service() {
         /**
          * Call once at process start. If the previous process died in the middle of a session,
          * nobody closed the voice link: the Bluetooth stack does not notice that the app is
-         * gone, the hearing aid stays in "call" mode and the next tap is refused. Close it now.
+         * gone, the hearing aid stays in "call" mode and the next tap is refused. Stop voice
+         * recognition now. The stop is asked for the selected hearing aid and no other
+         * device; by the Android 17 source Android applies a stop to the hands-free device
+         * that is active, whichever is named. So nothing is stopped while another hands-free
+         * device has its audio up, and nothing during a phone call: by the same source a call
+         * has ended the recognition of the dead process already.
+         *
+         * The flag is read before this function first waits. Started undispatched from
+         * `Application.onCreate` that is before any session of this process can begin, so a
+         * flag found set was left by the process that died. It is read again after the wait,
+         * because a session of this process clears it when it has closed its link.
+         *
+         * Without the phone's hands-free service nothing can be stopped. The flag is kept
+         * then, and the stop follows when the service comes (`session_recovery_waiting`):
+         * clearing the flag without a stop would leave the link to itself for good.
          */
         @SuppressLint("MissingPermission")
         suspend fun recoverAfterCrash(app: LaraApp) {
             val preferences = app.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
             if (!preferences.getBoolean(KEY_OPEN, false)) return
-            val headset = app.headset.await(5_000)
-            val stopped = headset?.connectedDevices?.map { device ->
-                runCatching { headset.stopVoiceRecognition(device) }.getOrDefault(false)
+            val since = SystemClock.elapsedRealtime()
+            val headset = app.headset.await(RECOVERY_PROXY_MS) ?: run {
+                app.journal.log("session_recovery_waiting", mapOf("why" to "no_hfp_proxy"))
+                app.headset.ready.filterNotNull().first()
             }
-            app.getSystemService(AudioManager::class.java).clearCommunicationDevice()
-            preferences.edit().putBoolean(KEY_OPEN, false).apply()
-            app.journal.log("session_recovered_after_crash", mapOf("voiceRecognitionStopped" to stopped))
+            // On the main thread, where a session is asked for, accepted and freed: between
+            // the question and the last line below no session can begin or end.
+            withContext(Dispatchers.Main) {
+                val waited = "waitedMs" to SystemClock.elapsedRealtime() - since
+                if (busy || startsPending.get() > 0) {
+                    // A session has started while this waited, or one is on its way. The link
+                    // and the flag are that session's now: a live session sets the flag when
+                    // it begins and clears it when it has closed its link. Clearing the flag
+                    // here would hide that session from the next process if this one died
+                    // in it too, and a stop would cut its link. A stop next to a start that
+                    // is on its way is no better: by the Android 17 source it takes away the
+                    // request of a tap that waits for its answer and sends the hearing aid
+                    // an error.
+                    //
+                    // Stepping aside has a price, and that session pays it. By the same
+                    // source Android ends a recognition that is still marked as started
+                    // when the next one is asked for, and refuses that very request
+                    // ("please try again"). So if the dead process left one behind, the
+                    // session's start is not accepted once and it runs over the virtual
+                    // call that rule 4 warns of (`session_voice_recognition_requested
+                    // accepted=false`, `session_link_up method=virtual_call`). `expect`
+                    // ties the two lines together for whoever reads the journal.
+                    app.journal.log(
+                        "session_recovered_after_crash",
+                        mapOf(
+                            "skipped" to if (busy) "session_running" else "session_starting",
+                            "expect" to "session_start_refused_once",
+                            waited,
+                        ),
+                    )
+                    return@withContext
+                }
+                if (!preferences.getBoolean(KEY_OPEN, false)) {
+                    // A session of this process has come and gone while this waited, also
+                    // one that failed for want of the hands-free service: it cleared the
+                    // flag when it had closed its link. Its start made Android end what the
+                    // dead process left behind, or there was nothing to end. A stop now,
+                    // possibly hours later, would only send the hearing aid an error.
+                    app.journal.log("session_recovered_after_crash", mapOf("skipped" to "flag_cleared", waited))
+                    return@withContext
+                }
+                val audio = app.getSystemService(AudioManager::class.java)
+                val aid = runCatching { app.headset.hearingAid(headset) }.getOrNull()
+                val voiceLink = aid?.let { runCatching { headset.isAudioConnected(it) }.getOrNull() }
+                // Never a stop that could land on somebody else's audio. In a call the stop
+                // could only disturb: Android has ended the recognition when the call came.
+                // With another hands-free device's audio up that device is the active one,
+                // and the stop would be applied to it.
+                val leftAlone = when {
+                    InputRouter.isCall(audio.mode) -> "phone_call"
+                    runCatching {
+                        headset.connectedDevices.any { !app.headset.store.isSelected(it) && headset.isAudioConnected(it) }
+                    }.getOrDefault(false) -> "other_device_audio"
+                    else -> null
+                }
+                val stopped =
+                    if (leftAlone == null) aid?.let { runCatching { headset.stopVoiceRecognition(it) }.getOrDefault(false) } else null
+                // this app's own request for a route, if the dead process left one; nobody else's
+                audio.clearCommunicationDevice()
+                // No session is busy or on its way, so none holds the flag: this clears the
+                // dead process's flag and nothing else. Also when the stop was left out:
+                // then somebody else's audio has taken the place of the dead session's link.
+                // If Android still had a recognition marked as started after that, the next
+                // session would not be accepted once, as above, and that would be the end of it.
+                preferences.edit().putBoolean(KEY_OPEN, false).apply()
+                app.journal.log(
+                    "session_recovered_after_crash",
+                    buildMap {
+                        if (leftAlone != null) put("skipped", leftAlone)
+                        // whether the hands-free audio was up before the stop; null if the
+                        // hearing aid is not connected, and then there was nothing to stop
+                        put("voiceLink", voiceLink)
+                        put("voiceRecognitionStopped", stopped)
+                        put(waited.first, waited.second)
+                    },
+                )
+            }
         }
 
         /**
@@ -327,10 +448,13 @@ class SessionService : Service() {
          *
          * The wait is limited: if the audio stays up for another reason (a phone call that
          * interrupted the session), the service is freed all the same.
+         *
+         * @return true if the audio was still up when the wait ran out
          */
         @SuppressLint("MissingPermission")
-        private suspend fun awaitLinkDown(app: LaraApp, link: AudioLink) {
-            val headset = app.headset.current() ?: return
+        private suspend fun awaitLinkDown(app: LaraApp, link: AudioLink): Boolean {
+            // without the hands-free service nobody can ask, and nobody could stop anything
+            val headset = app.headset.current() ?: return false
             // Android reports "connected" also while the link is being closed.
             fun up(): Boolean =
                 runCatching { app.headset.hearingAid(headset)?.let(headset::isAudioConnected) }.getOrNull() == true
@@ -341,6 +465,7 @@ class SessionService : Service() {
                 down = !up()
             }
             link.step("link_down", mapOf("down" to down, "waitedMs" to SystemClock.elapsedRealtime() - since))
+            return !down
         }
 
         /**
@@ -377,8 +502,10 @@ class SessionService : Service() {
                 .putExtra(EXTRA_PROGRAM, program)
                 .putExtra(BluetoothDevice.EXTRA_DEVICE, device)
             try {
+                startsPending.incrementAndGet()
                 context.startForegroundService(intent)
             } catch (e: Exception) {
+                startsPending.updateAndGet { if (it > 0) it - 1 else 0 }
                 LaraApp.instance.journal.log(
                     JournalNames.SESSION_REFUSED,
                     mapOf("trigger" to trigger, "where" to "startForegroundService", "exception" to e.toString()),

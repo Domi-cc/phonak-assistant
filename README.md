@@ -53,6 +53,7 @@ This repository is the app that answers them, and the notes on everything we lea
 | 🔨 | **Remote to wake:** a listener service scans for the remote all day, and a press opens a session by itself and is the first thing announced | built, not measured yet |
 | 🔨 | One router for every trigger; a count session for measurement series; control over adb; day counters and journal sharing on the screen | built, not tried on the phone yet |
 | 🔨 | **Spoken calendar reminders:** ten minutes before an appointment the aid says "In 10 Minuten: Zahnarzt". Read from the phone's own calendar storage, so it covers every calendar that is synced to the phone; off until you switch it on | built, not measured yet |
+| 🔨 | **The hearing aid's own job comes first:** the journal records when a sound channel to the aid is really open and whose it was, a voice link that stays up after a session is looked at again and reported, and two buttons support a listening test at home | built, not measured yet |
 | 🗓 | Spoken menu, Hermes connection, media keys | planned |
 
 <sub>All measurements: 27 November 2026, one device, small samples. Numbers and conditions: <a href="docs/measurements/2026-11-27.md">docs/measurements</a>.
@@ -290,7 +291,7 @@ compileSdk 37.2, minSdk 36, targetSdk 36 (switch with `-Plara.targetSdk=37`).
 
 | Path | What |
 |---|---|
-| `core/` | pure Kotlin, no Android imports: journal format, BTHome parser, press tracking with loss counting, routing decisions, count logic, adb parameters, planning and wording of the calendar reminders; 293 JVM tests |
+| `core/` | pure Kotlin, no Android imports: journal format, BTHome parser, press tracking with loss counting, routing decisions, count logic, adb parameters, planning and wording of the calendar reminders, the day's channel times; 339 JVM tests |
 | `app/…/trigger` | the invisible activity that receives the hearing-aid tap |
 | `app/…/assistant` | the three services that make the app a digital assistant |
 | `app/…/input` | the router that turns every trigger into an action, and the tap setting |
@@ -450,6 +451,7 @@ The streaming projects in this group use ASHA or LE Audio. The hearing aid used 
 - [x] Pocket remote: listening in the background, so that a press can open a session (built, not measured yet)
 - [x] Input router, count session, control over adb, day counters, journal sharing (built, not tried on the phone yet)
 - [x] Spoken calendar reminders ten minutes before an appointment, from the phone's calendar storage (built, not measured yet)
+- [x] Channel time: a journal and day counters of when a sound channel to the hearing aid is open, a follow-up for a voice link that stays up, a silence test (built, not measured yet)
 - [ ] Measurements: the remote as wake-up after minutes and hours of idle, in the pocket, per scan mode
 - [ ] Media keys as an extra trigger
 - [ ] Spoken menu: weather, appointments, to-dos

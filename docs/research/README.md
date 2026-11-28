@@ -43,3 +43,11 @@ Local paths in the reports were replaced by placeholders such as `<research>/` a
 | [verify-phonak-eon.md](verify-phonak-eon.md) | Phonak Audeo EON: profiles, Tap Control, single-aid fitting |
 | [verify-hermes-api.md](verify-hermes-api.md) | The Hermes API server at release v0.23.4 |
 | [verify-versions.md](verify-versions.md) | Tool and library versions, SDK package names, CI action versions |
+
+## Later checks
+
+Written after the two passes. The warning above holds for these too.
+
+| Report | Question |
+|---|---|
+| [hearing-function.md](hearing-function.md) | 28 November 2026: does a sound channel from the phone get in the way of the hearing aid's own job? What the aid does while streaming, how long Android keeps a stream open, every audio path of the app, and the tests on the ear. Three reports, each re-checked, in one document |

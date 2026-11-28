@@ -69,6 +69,35 @@ and the core tests pass; nothing of it has run on a device:
   the speech, and Android would have played the rest of a sentence on the phone's speaker.
   The hourly announcement, "Ansage jetzt" and "Beende" after a tap run through the same code.
 
+**Built after that, on the same day, not yet on the phone either** (the same branch, on top of
+the commit tagged `apk/20`; why and what for: "What a sound channel does to the hearing aid"
+below). It compiles, lint reports no errors and the core tests pass; nothing of it has run on a
+device:
+
+- `audio/AidChannels`: journals all day when a sound channel to the hearing aid is really open,
+  whoever opened it (`aid_media_stream` for the media stream, `hfp_audio_state` for the voice
+  link), with the time it was open and whether it was this app's. "Zähler heute" adds the
+  times up.
+- A safety net for the voice link: a link that is still up after its session is looked at
+  again 3 s, 10 s and 30 s later and reported, in the journal (`aid_voice_link_stuck`) and
+  with one vibration. It is stopped once more only if the session's own stop was not taken;
+  by the Android source a second stop closes nothing otherwise. The decision is in
+  `core/audio/StuckVoiceLink`, with tests.
+- Two buttons for the ear test in the section "Starten": "Stille-Test (5 s)" and "Klingt
+  wieder normal". A press in that section plays no click sound. The steps for the owner:
+  [`docs/measurements/hoerprobe.md`](docs/measurements/hoerprobe.md).
+- **`SessionService` and `Announcer` changed with it, and both are measured paths.**
+  `SessionService` no longer writes `hfp_audio_state` itself (`AidChannels` does, all day) and
+  hands a link that stays up to the follow-up; nothing inside a session changed its order or
+  its timing, and `AudioLink` only gained a property that keeps what its stop returned. The
+  recovery after a process death (`recoverAfterCrash`) is new: it asks for the stop for the
+  selected hearing aid only (before: for every connected hands-free device), it stops
+  nothing next to a session that runs or is on its way, in a phone call or while another
+  hands-free device has its audio up, and without the hands-free service it keeps its flag
+  and waits for the service. `Announcer` tells which announcement is playing (`playing`,
+  `lastEnded`), has a second entry `playSilence`, and its chime is played by a helper that
+  the silence test shares.
+
 **Not built:** media keys, spoken menu, Hermes connection, speech recognition.
 
 ## Decisions the owner made
@@ -77,6 +106,7 @@ and the core tests pass; nothing of it has run on a device:
 - One real app that starts as a measurement app, not throw-away prototypes.
 - README in English with related projects for other hearing-aid wearers; app texts and the design document in German.
 - All sound goes to the Phonak only. **Never** to a car kit, another headset or the phone speaker. He stressed this.
+- **The app must not get in the way of the hearing aid's own job**, amplifying the surroundings. His words, on 28 November 2026: "Bitte beachten: die App soll nicht die eigtl Funktion des Hörgerätes stoppen. Kannst du prüfen ob das passiert? Z.b. weil der Soundkanal die Hörverstärkung stoppt oder sowas?" That is the decision. What the agents derived from it, and he has not confirmed: a sound channel to the hearing aid is opened only for as long as something is to be heard or said, it is never kept warm, and whatever opens one is weighed against the hearing time it costs. Today's sessions do not keep to the first two, and that is known: a session holds the voice link open with silence for the 30 s it waits for the next press (rule 5 is why it plays silence; how long it waits is his to decide). Change nothing on the strength of the derived rules without asking him. What is known about the cost, and what is still his to decide: "What a sound channel does to the hearing aid".
 - Presses on the remote are announced in words, not with tones. Every normal end of a session says "Beende".
 - The count session (running numbers instead of words) is a measurement tool he did not ask for. It stays available for series, from the screen and over adb, but it is never what a tap or a press starts by default.
 - The hearing aid is chosen once, by him, on the screen; the remote is searched and picked on the screen. Addresses are shown shortened there.
@@ -171,20 +201,20 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 | Path | What |
 |---|---|
-| `core/` | pure Kotlin, 293 JVM tests: build label, journal format and names, BTHome parser, press tracking with loss counting, input model, routing (`Routing`, `WaitingInputs`), count logic, scan settings and start budget, adb parameters, day statistics, WAV reading, resampling, silence trimming, the calendar reminders (`calendar`: `ReminderPlanner`, `CalendarChoice`, the spoken lines in `CalendarTexts`) |
+| `core/` | pure Kotlin, 339 JVM tests: build label, journal format and names, BTHome parser, press tracking with loss counting, input model, routing (`Routing`, `WaitingInputs`), count logic, scan settings and start budget, adb parameters, day statistics with the channel times and their wording (`DayStats`, `ChannelTexts`), what a look at a voice link that stayed up does (`audio/StuckVoiceLink`), WAV reading, resampling, silence trimming, the calendar reminders (`calendar`: `ReminderPlanner`, `CalendarChoice`, the spoken lines in `CalendarTexts`) |
 | `app/…/trigger` | the invisible activity for the hearing-aid tap; hands the voice button of other devices on |
 | `app/…/assistant` | the three assistant services; `onReady` starts the listener and warms the phrases |
 | `app/…/input` | `InputRouter` (the only caller of `SessionService.start`), `TapStore` |
-| `app/…/audio` | `AudioLink` (the voice link), `SessionService`, `SessionPrograms`, `EchoProgram`, `CountProgram`, `HearingAidStore`, tones |
+| `app/…/audio` | `AudioLink` (the voice link), `SessionService`, `SessionPrograms`, `EchoProgram`, `CountProgram`, `HearingAidStore`, tones, `AidChannels` (when a sound channel to the hearing aid is really open; the follow-up of a voice link that stays up) |
 | `app/…/shelly` | `ShellyStore`, `ListenerService` with `RemoteScan`, `ListenerStarter` and `RescueScanReceiver`, `ShellyIntake` (packets to presses to the input bus), `ForegroundScan` (search and live test), `RemoteProgram`, phrases, tone fallback |
 | `app/…/speech` | `PromptCache` with `SpeechEngine`, the phrase lists (`Prompts`), `CountSounds` |
-| `app/…/announce` | unprompted announcements over the media channel, with the guard that cuts one off when its output changes; hourly test |
+| `app/…/announce` | unprompted announcements over the media channel, with the guard that cuts one off when its output changes; hourly test; the silence test |
 | `app/…/calendar` | `CalendarReminders` (plans, announces, owns the one alarm and the observer), `CalendarReader` (the phone's calendar storage), `CalendarStore` (switch, choice of calendars, what was announced), `CalendarAlarmReceiver` |
 | `app/…/control` | `AdbReceiver` |
 | `app/…/journal`, `app/…/ui` | journal, day counters, sharing; setup checklist and the sections of the one screen |
 | `docs/design/` | design document for version 0.1 (German); its "Nachtrag" overrides the older text. `kalender-ansagen.md`: the calendar reminders |
-| `docs/measurements/` | what was measured on the device |
-| `docs/research/` | AI research and verification reports; leads, not facts |
+| `docs/measurements/` | what was measured on the device. `hoerprobe.md`: the ear test, step by step, for the owner (German) |
+| `docs/research/` | AI research and verification reports; leads, not facts. `hearing-function.md`: what a sound channel does to the hearing aid, with every source |
 | `docs/adb-control.md` | the adb commands |
 | `docs/release.md` | signed builds, releases, the key |
 
@@ -206,7 +236,9 @@ Worth knowing before changing anything between a trigger and a sound:
   waited for a session which never listened, and opens the next session for a press made
   during "Beende". Why the wait for the audio: by the Android 17 source `startVoiceRecognition` is
   refused while the audio of the previous session is still closing, and `AudioLink` would then
-  fall back to the virtual call (rule 4). Not measured yet.
+  fall back to the virtual call (rule 4). Not measured yet. If the audio is still up after
+  the 1.5 s (`session_link_down down=false`), the service is freed all the same and the link
+  goes to the follow-up in `AidChannels`, outside the session.
 - **One scan for the remote.** `ListenerService` owns it. A session that listens to the remote
   (`remote`, `count`) only switches its mode (`ListenerService.setSessionOpen`, called by
   `SessionService`). The way back to the idle mode is taken 15 s after the session: sessions
@@ -296,6 +328,197 @@ Worth knowing before changing anything there:
   permission is held: Android refuses the registration with a `SecurityException` otherwise
   (read from the Android source, not tried).
 
+## What a sound channel does to the hearing aid
+
+The owner asked on 28 November 2026 whether the app can stop what the hearing aid is there
+for, for example because a sound channel stops the amplification. That was checked from three
+sides (the app's code, Phonak's documents, the Android 17 source), and each side was checked
+again by a second reader. The full report with every source:
+[`docs/research/hearing-function.md`](docs/research/hearing-function.md). Nothing in it was
+measured and nobody has listened yet. This is the short form; every statement says where it
+comes from.
+
+**What is known**
+
+- *Code.* The app has no command for the aid's amplification and sets no volume and no audio
+  mode. All it does to the aid is open one of two sound channels: the media channel (A2DP)
+  for an announcement, the voice link (hands-free) for a session.
+- *Phonak.* Every channel makes the aid leave its hearing program for a streaming program
+  and return afterwards (knowledge base, not specific to the EON). The names of the programs
+  are from the EON's product information: "Media speech + mic" and "Media music + mic" for
+  the media channel, "Phone call + mic" for a call over the hands-free link. Knowledge base
+  again: "Hearing aid microphones will stay on by default while receiving streaming signals.
+  The balance between hearing aid microphones and streaming signals is customizable." Any
+  sound of the phone does the same, however short.
+- *Not in any Phonak document.* How much quieter the surroundings are in those programs: it
+  is a setting of the individual fitting with no published default. How long the aid takes
+  to come back. Which program a voice-recognition link without a phone call selects.
+- *Forum reports about predecessor models.* Wearers describe a clear change of the
+  surroundings while the streaming program is active: mostly a dip, in one case for 7 to
+  8 s after a single key click on the phone, and for some the opposite, surroundings that
+  get louder. A hint, not a fact about this aid.
+- *Android 17 source.* Media channel: Android starts the Bluetooth stream at the first
+  write, silence included, and suspends it 3 s after the last track has ended (AudioFlinger's
+  standby, forced to at least 3 s for A2DP). For ordinary PCM playback there is no
+  supported way to shorten that; whether another kind of output would close sooner on this
+  phone is unknown (hearing-function.md, A3.a). One announcement therefore holds the stream
+  for about (`announce_end` minus `announce_start`) + 3 s, roughly 6 to 7 s. The phone's own
+  sounds (notification, touch and lock sounds) open the same stream with the same 3 s.
+- *Android 17 source (`A2dpStateMachine`).* Every time a device's media profile connects,
+  Android reports "not playing" for it, with "playing" as the state before, although no
+  stream was open.
+- *Code.* Voice link: held open with silence for the whole session (rule 5). That is about
+  33 to 35 s for a remote session that runs out without a press, 30 s of it the idle wait,
+  and about 13 s for an echo test; every press starts the 30 s anew, and a second tap or a
+  long press of button 4 ends a session earlier. A single press on the pocket remote opens
+  a session by default. This is the app's largest share.
+- *Android 17 source, inferred for this phone.* When the voice link closes, the session's
+  output is still awake and may be re-routed to the aid's media device. That would add a
+  silent media stream of up to 3 s after every session.
+- *Android 17 source (`HeadsetService`, `HeadsetStateMachine`).* `stopVoiceRecognition`
+  closes the audio only while Android has a recognition marked as started, and every stop
+  that gets that far clears the mark. Otherwise it closes nothing, sends the hearing aid an
+  error result, and takes away the request of a tap that is waiting for its answer. Asked
+  for a device that is not the active hands-free device, it acts on the active one. While
+  hands-free audio is up Android refuses a tap and every start of a recognition. A start
+  that finds an earlier recognition still marked ends that one and is refused itself. A
+  phone call that comes in ends a started recognition. When Android's attempt to close the
+  audio fails, or has not come through after 30 s, it reports "connected" a second time,
+  with "connected" as the state before; whether anything tries again after that was not
+  established. An attempt to open the audio that is refused or fails at once is reported
+  as "disconnected" with "disconnected" before.
+- *Unmeasured, all of it.* How long the channels are really open on this phone, and what
+  this aid with its fitting does meanwhile. The first the journal can show now. The second
+  only the ear can tell.
+
+**The instrument** (built on 28 November 2026, not yet on the phone)
+
+- `audio/AidChannels` journals what the Bluetooth stack reports for the selected hearing
+  aid, all day, with one receiver that lives as long as the process:
+  - `aid_media_stream` with `state=playing` or `state=stopped`: the media stream was really
+    started or suspended, for sounds of any app. `stopped` carries `onMs`, how long it was
+    open. `announcing=true` (with `announceReason`) means that an announcement of this app
+    was playing or had ended within the last 4 s: the app's share. `announcing=false` is a
+    sound of the phone or of another app.
+  - `aid_media_stream` with `state=not_playing` is no stream. Android reports "not playing"
+    every time the aid's media profile connects (the aid is switched on, comes back into
+    range or leaves its charger), and this is the word for such a report with no `playing`
+    before it. No counter reads it. A stream that was playing already when the process
+    started ends with the same line, and its time is in no number.
+  - `hfp_audio_state` with `state=connecting`, `connected` or `disconnected`: the voice link.
+    `session` says whether a session of this app held it, `mode` is the phone's audio mode
+    (a phone call reads `in_call`), and `disconnected` carries `onMs`. It also carries
+    `callMs` if the phone went into a call while the link was up or coming up: the part of
+    `onMs` after that. A call that comes in during a session may take the session's link
+    over without a line in between, and that part is not the session's. A second
+    `connected` with `repeated=true` means that Android did not get the audio closed;
+    `onMs` counts from the first. `state=not_connected` is no link: Android's report of an
+    attempt at the audio that was refused or failed at once.
+  - `aid_channels_watching`: from this line on the reports arrive. Before it, or after
+    `aid_channels_no_permission`, no line does not mean no channel. The line is written
+    once per process and a process lives for days, so the first line of every later day
+    file, `journal_day`, says it again as `aidChannelsWatching=true` or `false`.
+    `aid_channels_at_start` says whether the voice link was up when the process started;
+    for the media stream that is unknown until its first report.
+- How to read it:
+  - Android's tail after an announcement: the time of `aid_media_stream state=stopped` minus
+    the time of `announce_end`. Expected: about 3 s.
+  - What one announcement costs: `onMs` of the `stopped` line with `announcing=true`.
+  - Whether a session is followed by a media stream: an `aid_media_stream state=playing`
+    with `announcing=false` in the seconds after `hfp_audio_state state=disconnected`. Only
+    with the phone's own sounds off (the last point of this list): a touch on the screen in
+    those seconds reads the same.
+  - The aid's own way back: the time of `marker text=surroundings_normal` minus the time of
+    the `stopped` or `disconnected` line before it.
+  - Whether the aid reacts to the stream itself or only to sound in it: what the owner
+    heard in the silence test, next to `announce_start silence=true` and the
+    `aid_media_stream` lines around it. A test counts only if its `playing` line comes
+    after `announce_start silence=true`: a stream that was open before had a sound in it.
+  - **The phone's own sounds open the same stream, a touch on the screen included.**
+    Android plays a click for a press on a button (with Compose 1.13 for every clickable;
+    "tap and click sounds" are on by default, and not played in vibrate or silent mode).
+    Typing, notifications and the lock sound do the same. Each one reads
+    `aid_media_stream ... announcing=false`, or keeps the stream of an announcement open
+    for longer. The section "Starten" plays no click for its own buttons
+    (`SoundEffectOnInteraction`, read from the Compose library and not tried on the
+    phone); every other touch in the app still does. For the ear test the phone is put
+    on vibrate.
+- "Zähler heute" shows how often and how long each channel was open today: "Musik-Kanal"
+  split into "App" and "anderes", "Sprach-Kanal" into "Sitzungen" and "anderes" (phone
+  calls, the `callMs` of a session's link included). A channel is counted at the line that
+  closes it (`core/stats/DayStats`); a closing line without `onMs` is an opening "ohne
+  Dauer". One such line gets its length all the same: the `disconnected` of a voice link
+  that outlived its process. The process died in a session, the new one did not see the
+  link come up, so its line has no `onMs` and reads `session=false`. The counter takes the
+  length from the clocks of that line and of the dead process's `connected` line, and the
+  session from the dead process's lines.
+- Two buttons in the section "Starten". "Stille-Test (5 s)" plays five seconds of pure
+  silence over the media channel, through the announcer's checks and its guard, with no
+  chime, no speech engine and no request for the audio focus (`announce_start` and
+  `announce_end` with `reason=screen_silence` and `silence=true`). With Android's 3 s the
+  stream is open for about 8 s. "Klingt wieder normal" writes
+  `marker text=surroundings_normal`; the owner presses it the moment the room sounds as
+  before.
+- The instrument sees what the phone sends. What the aid does with it (which program, how
+  loud the surroundings) it cannot see.
+
+**The safety net for the voice link**
+
+- A session whose audio is still up when its wait runs out (`session_link_down down=false`)
+  hands the link to `AidChannels.followStuckLink`, which looks again 3 s, 10 s and 30 s
+  later. A look ends the follow-up with `aid_voice_link_follow_up end=...` if a new session
+  is busy (`new_session`), if the phone is in a call or ringing (`phone_call`), if the link
+  was reported down at any moment since the session began to close (`went_down`), if it
+  is down now (`is_down`), or if the reports do not show that it came up while a session
+  was busy (`not_the_sessions`: another app's audio that was on the aid before the session
+  and is there still). The follow-up of a later session takes its place (`replaced`), and
+  it does not start at all without the reports of the instrument (`not_watching`).
+  Otherwise the look writes `aid_voice_link_stuck`, and the first such look of a follow-up
+  vibrates. A third look that still finds the link up is followed by
+  `aid_voice_link_gave_up`. **It never touches a link that the session did not open**; that
+  is what the reasons to end are for. The rule is in `core/audio/StuckVoiceLink`: change it
+  there, with a test.
+- **Mostly it can only report.** By the Android source (above) a stop closes the audio only
+  while Android has a recognition marked as started, and the session's own stop has cleared
+  that mark if Android took it. So a follow-up calls `stopVoiceRecognition` once at most, at
+  its first look that finds the link stuck, and only if the session's stop was not taken or
+  never made (`voiceRecognitionStopped` false or null in `session_end`;
+  `aid_voice_link_stuck action=stop_again`). In every other case the line reads
+  `action=report_only`: an ordinary app has no stronger call. By the same source the one
+  stop cannot take away a waiting tap or another app's recognition, because Android
+  accepts neither while the audio is up.
+- A look runs on the main thread from its questions to the stop, and so does the recovery
+  after a process death (`SessionService.recoverAfterCrash`). Sessions are asked for,
+  accepted and freed on that thread, so neither can stop the link of a session that has
+  just begun.
+- The recovery asks for one stop, for the selected hearing aid, when the process before
+  left its flag behind (`session_recovered_after_crash`, with `voiceLink` as found). It
+  stops nothing and says why in `skipped`: next to a session that runs or is on its way
+  (`session_running`, `session_starting`; the flag stays, it is that session's now), after
+  a session of the new process has cleared the flag (`flag_cleared`), in a phone call
+  (`phone_call`), and while another hands-free device has its audio up
+  (`other_device_audio`: Android would apply the stop to that device).
+
+**Decisions that are the owner's and still open.** He has not been asked yet, and the
+behaviour is unchanged:
+
+1. The 30 s a session waits for the next press, and whether a press of the remote should
+   open a session at all, or only a short one until a second press shows that it was meant.
+   This is the largest share of channel time, and a press can come from a pocket.
+2. "Beende" over the media channel after a second tap. The aid has just closed the voice
+   link, and the word opens the media channel: a second program switch. He asked for
+   "Beende" at every end.
+3. The hourly announcement at night.
+4. The last sentence of README.md, "it does not change anything about how a hearing aid
+   amplifies sound". With what is known now it says too much: the app has no command for
+   the amplification, but every sound it plays makes the aid change program. A text that
+   holds: "It has no command for a hearing aid's amplification. Like every sound a phone
+   plays, its sound makes the aid switch to its streaming program for as long as it plays."
+   The paragraph is his and was left as it is.
+
+The ear test and a day of the journal's numbers come first: they say what each of the first
+three costs.
+
 ## History of the background-listening increment
 
 On 27 November 2026 agents built a larger increment in a scratch copy that started from an older
@@ -342,7 +565,17 @@ Two reviews of the port, before it reached the phone, changed this:
 
 ## Next steps, in order
 
-1. **Install the ported build and check it on the phone** before anything else is built on it.
+1. **The ear test.** It answers the owner's question, and only he can do it:
+   [`docs/measurements/hoerprobe.md`](docs/measurements/hoerprobe.md). Install the build and look
+   for `aid_channels_watching` in the journal. Then, with the phone on vibrate (its own
+   click and notification sounds open the same channel) and a radio at a steady level:
+   "Ansage jetzt", "Stille-Test (5 s)" and a session, each followed by "Klingt wieder
+   normal" the moment the room sounds as before; then "Heute teilen". How to read the journal: "What a
+   sound channel does to the hearing aid" above. The same journal shows whether the reports
+   about the media stream reach the app at all (read from the source, not tried). The open
+   decisions listed there come after it. If the tap or the announcement does not work at
+   all, the next step comes first.
+2. **Check the ported build on the phone** before anything else is built on it.
    In this order: the tap still opens a remote session and "Taste 1 kurz" is still spoken
    (the remote is now heard through the listener's scan); `listener_start` and `scan_started`
    in the journal, the notification "Lara lauscht auf die Fernbedienung"; a press with the
@@ -368,20 +601,21 @@ Two reviews of the port, before it reached the phone, changed this:
    them); a reminder during a phone call waits (`calendar_waiting why=phone_call`); a tap
    while a reminder is spoken cuts it off; nothing of a title is in the journal. The whole
    list: `docs/design/kalender-ansagen.md`, "Am Gerät noch zu prüfen".
-2. Then measure: can a Shelly press open a session with the phone dark, after minutes and after
+3. Then measure: can a Shelly press open a session with the phone dark, after minutes and after
    hours? Expect trouble from Android 17's scan allowance
    (`scan_allowance_throttling_enabled=true` on this phone; effect unmeasured). Compare the idle
    scan modes and the rescue scan. Hold a button for ten seconds once and look at what arrives:
    a continuous hold could be the reliable wake gesture.
-3. Longer reference series for the remote (30 paced presses, app on screen, passive against
+4. Longer reference series for the remote (30 paced presses, app on screen, passive against
    active scan type), and the same in a session with the phone in a pocket. The count session
    and the adb commands are made for this.
-4. Let the hourly test run for a day and read alarm lateness and outcome per Doze state.
-5. Update the design document to the measurements, then design the spoken menu.
-6. Media keys through `SET_MEDIA_KEY_LISTENER` (adb-grantable, slot was free on this phone).
-7. Hermes: HTTP API server (port 8642, bearer key), not the WebSocket; reach it over WireGuard.
+5. Let the hourly test run for a day and read alarm lateness and outcome per Doze state. The
+   same day gives the phone's own share of channel time ("Zähler heute").
+6. Update the design document to the measurements, then design the spoken menu.
+7. Media keys through `SET_MEDIA_KEY_LISTENER` (adb-grantable, slot was free on this phone).
+8. Hermes: HTTP API server (port 8642, bearer key), not the WebSocket; reach it over WireGuard.
    See `docs/research/verify-hermes-api.md`.
-8. First release: the owner decides when. The secrets are in place.
+9. First release: the owner decides when. The secrets are in place.
 
 Known gaps of the port, none of them urgent: the journal has no size limit and old day files
 are never deleted; `shelly_packet` writes one line per advertisement on the main thread; a tap
@@ -403,3 +637,46 @@ after its begin while the process was gone); an announcement longer than 20 s is
 and the announcer's guard have no unit tests of their own (the decisions are tested in
 `core`, the calls into Android are not), and how long a read of the calendar takes has not
 been measured.
+
+Known gaps around the sound channels. Found in the audit of 28 November 2026 and
+deliberately not fixed: `AudioLink.close` writes the closing phrase with a blocking write
+that has no time limit, before `stopVoiceRecognition` (if the audio system ever stopped
+taking samples the stop would not be reached; no way to trigger that was found);
+announcements queue without limit and are not merged, each with its own warm-up and chime;
+Android's assist gesture starts an echo test, a voice link with a recording, also when it is
+made by accident; the tap activity is exported without a permission, so any app on the phone
+can open a voice link to the selected hearing aid; a stop that finds nothing to stop (after a
+second tap, in the recovery, and in the one stop of a follow-up) makes Android send the
+hearing aid an error result, and whether the aid reacts to it is unknown.
+
+Gaps of the safety net: a link that stays up although Android took the session's stop is
+reported and nothing more, because nothing an ordinary app can call closes it; a recovery
+that finds a session running or on its way steps aside, and if the dead process left a
+recognition marked as started, that session's start is refused once and it runs over the
+virtual call of rule 4 (`session_recovered_after_crash` with `skipped` and
+`expect=session_start_refused_once`, then `session_voice_recognition_requested
+accepted=false`); `SessionService` ends a session on the audio report of any hands-free
+device, not only the hearing aid's (older than this change, behaviour unchanged; the journal
+now says `session_interrupted why=hfp_audio_other_device`).
+
+Gaps of the instrument itself: that the report about the media stream reaches an ordinary
+app on this phone is read from the source and not tried, and without it `aid_media_stream`
+never appears and the media counter stays at zero; whose a media stream is goes by the line
+that closes it, so music into which an announcement falls counts as "anderes", a sound of
+the phone that ends within a second after an announcement counts as "App", and one that
+ends later (a notification, a touch on the screen) turns the whole stream, the announcement
+included, into "anderes"; a media stream that was playing when the process started is in no
+number, and its end reads `not_playing`; if the Bluetooth process dies while a stream plays,
+no stop is reported, and the "not playing" at the aid's next connect closes that stream
+with an `onMs` of hours; a media stream that Android opens by itself after a session, if
+there is one, counts as "anderes" although a session caused it; that the phone's audio mode
+stays `normal` during a session is read from the source and not measured, and with a call
+mode there the counter would book sessions under "anderes" (`mode` on the session's
+`hfp_audio_state` lines shows it); the length of a voice link that outlived its process is
+taken from the clocks of two lines, which is wrong if that link went down and another came
+up while no process was there to see it; the time of a line is the time the report reached
+the app, and whether a report can be held back while the phone sleeps has not been tried
+(the journal's clocks show it); a channel opened before midnight is booked whole on the day
+it closes; `AidChannels`, the silence test and the changed recovery have no unit tests of
+their own (the decisions of the follow-up and the counting are tested in `core`); the
+journal gains two lines for every sound the phone plays into the hearing aid.

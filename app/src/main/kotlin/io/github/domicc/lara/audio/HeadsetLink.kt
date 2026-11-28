@@ -10,6 +10,8 @@ import android.content.Context
 import android.content.pm.PackageManager
 import io.github.domicc.lara.journal.Journal
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
@@ -27,6 +29,12 @@ class HeadsetLink(
 
     private val proxy = MutableStateFlow<BluetoothHeadset?>(null)
     private var requested = false
+
+    /**
+     * The connection to the hands-free service; null until it is there and while it is lost.
+     * For whoever has to act the moment it comes, however late that is.
+     */
+    val ready: StateFlow<BluetoothHeadset?> = proxy.asStateFlow()
 
     /** Safe to call repeatedly; does nothing without the Bluetooth permission. */
     @Synchronized

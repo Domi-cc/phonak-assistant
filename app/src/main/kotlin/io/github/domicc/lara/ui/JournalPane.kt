@@ -35,7 +35,7 @@ private val clock = SimpleDateFormat("HH:mm:ss.SSS", Locale.GERMANY)
  */
 private val badWords = listOf(
     "error", "refused", "timeout", "lost", "unbound", "failed", "dropped", "rejected", "gave_up", "unreadable", "unhandled",
-    "announce_skipped", "no_scan", "no_permission", "calendar_missed", "calendar_test_skipped",
+    "announce_skipped", "no_scan", "no_permission", "calendar_missed", "calendar_test_skipped", "stuck",
 )
 
 /**

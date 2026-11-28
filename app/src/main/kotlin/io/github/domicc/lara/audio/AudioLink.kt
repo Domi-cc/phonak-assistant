@@ -88,6 +88,16 @@ class AudioLink(
     val isOpen: Boolean get() = track != null && !closed
 
     /**
+     * What [close] got when it stopped voice recognition: true if Android took the stop, false
+     * if it did not. Null before [close], and if no stop was made because the start had not
+     * been accepted. Only to be read: the follow-up of a link that stays up decides with it
+     * whether one more stop can help ([io.github.domicc.lara.core.audio.StuckVoiceLink]).
+     */
+    @Volatile
+    var voiceRecognitionStopped: Boolean? = null
+        private set
+
+    /**
      * Called (on the main thread) when another app takes audio focus away for good or for a
      * while: a phone call, an alarm, a navigation prompt. The session must end then.
      */
@@ -283,6 +293,7 @@ class AudioLink(
         } else {
             null
         }
+        voiceRecognitionStopped = stopped
         focusRequest?.let { audio.abandonAudioFocusRequest(it) }
         // the type and the result are what the counters on the screen read back
         journalStep(JournalNames.SESSION_END, mapOf(JournalNames.RESULT to result, "voiceRecognitionStopped" to stopped))
