@@ -32,6 +32,7 @@ Zahlen und Bedingungen stehen unter `docs/measurements/2026-11-27.md`.
 - *Signaturschlüssel:* liegt als Secret bei GitHub Actions. Die Pipeline baut signiert, für Versions-Tags als Release und auf Knopfdruck für jeden Branch. Der Versionscode ist die Zahl der Commits.
 - *Shelly-Messung (6.4 B, 7):* Verpasste Drücke werden über die fortlaufende Paketnummer des Shelly gezählt, nicht durch Mitzählen. Der Scan wird nur während einer offenen Sitzung hochgefahren. Für lange Reihen gibt es einen stillen Modus, der nur mitschreibt.
 - *Scan-Drossel (3):* Am Telefon ist sie als Einstellung gesetzt. Ob und wie stark sie wirkt, ist noch nicht gemessen.
+- *Erinnerungen (2, Nicht-Ziele):* Gesprochene Erinnerungen vor Terminen aus dem Kalender des Telefons sind inzwischen gebaut (28.11.2026, noch nicht auf dem Telefon gelaufen), ohne Hermes. Ihr Design steht in [`kalender-ansagen.md`](kalender-ansagen.md).
 
 ## 1. Worum es geht
 

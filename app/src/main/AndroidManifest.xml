@@ -16,8 +16,11 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <!-- For announcements at a set time (hourly test, later reminders). Granted at install. -->
+    <!-- For announcements at a set time (hourly test, calendar reminders). Granted at install. -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- For the spoken reminders before appointments. Asked for when the owner switches them
+         on; until then the app reads nothing from the calendar. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
     <!-- Development permission. Has no effect until the owner runs:
          adb shell pm grant io.github.domicc.lara android.permission.SET_MEDIA_KEY_LISTENER -->
     <uses-permission
@@ -118,6 +121,12 @@
         <!-- Alarm target for the hourly test announcement. -->
         <receiver
             android:name=".announce.HourlyReceiver"
+            android:exported="false" />
+
+        <!-- Alarm target for the calendar reminders: a reminder falls due, or it is time to
+             read the calendar again. -->
+        <receiver
+            android:name=".calendar.CalendarAlarmReceiver"
             android:exported="false" />
 
         <!-- One spoken interaction with the hearing aid. Runs only while a session is active. -->

@@ -18,9 +18,9 @@ Hermes connection come after the measurements.
 - Distribution: sideloaded APK (adb, GitHub Releases). No Play Store.
 - Repository: public, Apache-2.0. App id `io.github.domicc.lara`.
 
-## State on 27 November 2026
+## State on 28 November 2026
 
-**Worked on the device** with the build of that day (details and numbers: [`docs/measurements/2026-11-27.md`](docs/measurements/2026-11-27.md)):
+**Worked on the device** with the build of 27 November 2026 (details and numbers: [`docs/measurements/2026-11-27.md`](docs/measurements/2026-11-27.md)):
 
 - The sideloaded app holds the assistant role; the role survives updates.
 - A double tap on the hearing aid starts the app with the phone locked, dark and in Doze. The display stays off.
@@ -29,7 +29,7 @@ Hermes connection come after the measurements.
 - Unprompted announcements over the media channel; the hourly test announcement fired from Doze 48 ms late.
 
 **Built on top of that, not yet on the phone** (the branch `background-listener`; how it came
-about: "History of the background-listening increment" below). It compiles, lint is clean and
+about: "History of the background-listening increment" below). It compiles, lint reports no errors and
 the core tests pass. **None of it has run on a device**, and it changed the way the measured
 paths above take through the code:
 
@@ -48,6 +48,27 @@ paths above take through the code:
 - `control/AdbReceiver` and [`docs/adb-control.md`](docs/adb-control.md); day counters and
   journal sharing; a screen made of folding sections above the journal.
 
+**Built after that, on 28 November 2026, not yet on the phone either** (the branch
+`calendar-reminders`, on top of `background-listener`; design:
+[`docs/design/kalender-ansagen.md`](docs/design/kalender-ansagen.md)). It compiles, lint reports no errors
+and the core tests pass; nothing of it has run on a device:
+
+- `calendar/CalendarReminders`: spoken reminders for appointments. Ten minutes before one begins
+  the announcer says "In 10 Minuten: Zahnarzt" over the media channel. The appointments come
+  from Android's calendar storage (`CalendarContract.Instances`, permission `READ_CALENDAR`),
+  which holds every calendar synced to the phone: no Google API, no network. Off by default.
+- One alarm for whatever has to happen next (`calendar/CalendarAlarmReceiver`). A new plan
+  at process start, on that alarm, on a changed setting, and when the calendar storage reports a
+  change. What is due, what waits, what is given up or was missed and what counts as announced
+  is decided in `core/calendar/ReminderPlanner`, with tests.
+- The section "Kalender" on the screen (switch, permission, list of calendars, next
+  announcement, test button); `lara.CALENDAR` over adb and `calendar=` in `lara.STATUS`.
+- **`announce/Announcer` changed with it, and that is a measured path:** it now watches the
+  output from the chime to the last word and cuts an announcement off when the hearing aid
+  goes away or another device takes the sound over. Before, it asked once, seconds before
+  the speech, and Android would have played the rest of a sentence on the phone's speaker.
+  The hourly announcement, "Ansage jetzt" and "Beende" after a tap run through the same code.
+
 **Not built:** media keys, spoken menu, Hermes connection, speech recognition.
 
 ## Decisions the owner made
@@ -59,6 +80,8 @@ paths above take through the code:
 - Presses on the remote are announced in words, not with tones. Every normal end of a session says "Beende".
 - The count session (running numbers instead of words) is a measurement tool he did not ask for. It stays available for series, from the screen and over adb, but it is never what a tap or a press starts by default.
 - The hearing aid is chosen once, by him, on the screen; the remote is searched and picked on the screen. Addresses are shown shortened there.
+- A spoken reminder ten minutes before an appointment: "In 10 Minuten: <Titel>". "Erstmal einfach": one fixed lead time, nothing to configure. The appointments come from the calendars on the phone (Google Calendar and whatever else is synced there), and which calendars are announced can be ticked on the screen.
+- **Titles of appointments never go into the journal**, and neither do descriptions, locations, names of calendars or account names (those are e-mail addresses). He shares the journal for analysis, and it also goes to logcat. Counts, ids, times and lengths only; the same holds for adb answers and for exception texts. On the phone's own screen they may be shown.
 - The signing key lives in GitHub Actions secrets; GitHub builds the signed APKs. The key is not copied to other machines.
 - The app shows its build number, and every APK he gets has a higher one than the last. He tests without a computer next to him and names the build when he reports. How that is kept: "Build, install, release" below.
 - He likes fast iterations with something to try on the phone, and short status messages in German.
@@ -135,7 +158,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
   Doze, role, binding, scan). The screen leaves out `shelly_packet` (one line per advertisement);
   logcat and the files have it.
 - The app can be driven over adb (start a session, change scan settings, write a marker, simulate
-  a press, ask for the status): [`docs/adb-control.md`](docs/adb-control.md). Not tried on the phone yet.
+  a press, ask for the status, ask for a new plan of the calendar reminders):
+  [`docs/adb-control.md`](docs/adb-control.md). Not tried on the phone yet.
 - Useful system tags: `HeadsetService`, `HeadsetStateMachine`, `ActivityTaskManager`,
   `AS.AudioDeviceBroker`, `BtScan.ScanManager`. More commands: README, "Debugging toolkit".
 - An update restarts the app. Do not install while the owner is in the middle of a test, and not
@@ -147,17 +171,18 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 | Path | What |
 |---|---|
-| `core/` | pure Kotlin, 222 JVM tests: build label, journal format and names, BTHome parser, press tracking with loss counting, input model, routing (`Routing`, `WaitingInputs`), count logic, scan settings and start budget, adb parameters, day statistics, WAV reading, resampling, silence trimming |
+| `core/` | pure Kotlin, 293 JVM tests: build label, journal format and names, BTHome parser, press tracking with loss counting, input model, routing (`Routing`, `WaitingInputs`), count logic, scan settings and start budget, adb parameters, day statistics, WAV reading, resampling, silence trimming, the calendar reminders (`calendar`: `ReminderPlanner`, `CalendarChoice`, the spoken lines in `CalendarTexts`) |
 | `app/…/trigger` | the invisible activity for the hearing-aid tap; hands the voice button of other devices on |
 | `app/…/assistant` | the three assistant services; `onReady` starts the listener and warms the phrases |
 | `app/…/input` | `InputRouter` (the only caller of `SessionService.start`), `TapStore` |
 | `app/…/audio` | `AudioLink` (the voice link), `SessionService`, `SessionPrograms`, `EchoProgram`, `CountProgram`, `HearingAidStore`, tones |
 | `app/…/shelly` | `ShellyStore`, `ListenerService` with `RemoteScan`, `ListenerStarter` and `RescueScanReceiver`, `ShellyIntake` (packets to presses to the input bus), `ForegroundScan` (search and live test), `RemoteProgram`, phrases, tone fallback |
 | `app/…/speech` | `PromptCache` with `SpeechEngine`, the phrase lists (`Prompts`), `CountSounds` |
-| `app/…/announce` | unprompted announcements over the media channel, hourly test |
+| `app/…/announce` | unprompted announcements over the media channel, with the guard that cuts one off when its output changes; hourly test |
+| `app/…/calendar` | `CalendarReminders` (plans, announces, owns the one alarm and the observer), `CalendarReader` (the phone's calendar storage), `CalendarStore` (switch, choice of calendars, what was announced), `CalendarAlarmReceiver` |
 | `app/…/control` | `AdbReceiver` |
 | `app/…/journal`, `app/…/ui` | journal, day counters, sharing; setup checklist and the sections of the one screen |
-| `docs/design/` | design document for version 0.1 (German); its "Nachtrag" overrides the older text |
+| `docs/design/` | design document for version 0.1 (German); its "Nachtrag" overrides the older text. `kalender-ansagen.md`: the calendar reminders |
 | `docs/measurements/` | what was measured on the device |
 | `docs/research/` | AI research and verification reports; leads, not facts |
 | `docs/adb-control.md` | the adb commands |
@@ -210,6 +235,66 @@ Worth knowing before changing anything between a trigger and a sound:
   its first line ran would otherwise never clean up and leave the service busy for good.
 - After a second tap the service is freed first and "Beende" follows over the media channel
   half a second later, unless a new session has begun by then.
+
+## How the calendar reminders fit in
+
+Worth knowing before changing anything there:
+
+- **One plan, one alarm.** `CalendarReminders.requestPlan` reads the calendars, announces what
+  is due and sets the one alarm for the next thing that has to happen: a reminder, a new try
+  while a session or a phone call runs (every 20 s), or a look into the calendar, which comes
+  after six hours at the latest also when a reminder is planned further ahead. All of these
+  are exact alarms; only the look into a calendar with nothing ahead is inexact. Plans run
+  one after the other; the alarm of the newest stands.
+- **The planner decides, the app carries out.** `ReminderPlanner.plan` gets what the calendar
+  lists, what is done with and what waited, and answers with what to announce, what waits on,
+  what is given up, what was missed and when to wake. `ReminderPlan.settled` is remembered
+  (`CalendarStore.markHandled`) before anything is spoken. Change a rule there, with a test.
+- **A failed read does not move the alarm.** A plan that cannot read the calendar sets the
+  alarm again for the time the last good plan chose, or for a new try to read before that
+  (after one minute, then twice as long each time, six hours at most:
+  `ReminderPlanner.retryAfterFailure`). A calendar storage that does not answer is told
+  after 3 s to drop the question (`CalendarReader`): one read that hangs would otherwise
+  hold up every later plan.
+- **Nothing audible except through `Announcer.announce`.** If the hearing aid is not the only
+  output the announcer skips and journals that, and the appointment still counts as announced:
+  no retry, no vibration, no other way out. The announcer watches the output until the last
+  word (`OutputGuard` in `Announcer`: the notice that an output is about to go, the reports
+  of audio devices, and a question every 200 ms) and stops the speech engine when the sound
+  is no longer the hearing aid's alone. None of the three signals has been tried on the phone.
+- **Once per occurrence.** An occurrence is remembered (event id and begin) before the
+  announcer is called; a moved appointment has a new begin and is announced again. One case
+  is said twice: a single occurrence of a series that is changed after its reminder, because
+  the calendar storage then lists it as a new event with the old begin
+  (`core/calendar/CalendarInstance.kt`). Left as it is; the design document says so.
+- **Not into a session, not into a phone call.** While `SessionService.busy`, or while the
+  audio mode is one of a call (`InputRouter.isCall`, ringing included), the reminder waits and
+  is given up when the appointment begins (`calendar_waiting`, `calendar_gave_up`). The same
+  question is handed to the announcer (`stopIf`), so a session that starts while a reminder is
+  spoken cuts it off, and a second reminder that waited behind the first is skipped rather
+  than spoken into the session. A reminder that waited is released one second after the
+  session was seen to be over, because Android needs a moment to send media to the hearing
+  aid again. The feature only reads the flag and the mode: it touches neither the voice link
+  nor the session service nor the remote's scan. **The phone call is not something the owner
+  asked for.** It came out of the review, on the model of the router; tell him, and take it
+  out of `CalendarReminders.holdBack` if he wants the reminder dropped instead.
+- **A reminder that did not come leaves a line.** An appointment that the plan before had
+  ahead of it and that has begun without being announced or given up is journaled once as
+  `calendar_missed` and remembered. The first plan of a process has no plan before it and
+  counts everything that began within the last hour. An appointment entered after its begin
+  is not missed. `calendar_plan` counts what it left out by reason (`allDay`, `cancelled`,
+  `declined`, `unselected`). With these the journal can tell "never seen" from "seen too late".
+- **Choices are forgotten with their calendar.** Android numbers a new calendar one above the
+  highest number in use, so the number of a removed calendar comes back. Every plan drops the
+  ticks of calendars that are gone (`calendar_selection_forgotten`).
+- **Titles stay out of everything that is written.** `CalendarInstance` and `Reminder` leave
+  them out of `toString`; `PhoneCalendar` and `CalendarStatus` are no data classes for the same
+  reason; the announcer is called with `logText = false` and journals `textLength`; exceptions
+  are journaled by class name, without their message. Keep to that with every new journal line.
+- **Off means off.** While "Termine ansagen" is off the app does not touch the calendar
+  storage. The observer for changes is registered only while the feature is on and the
+  permission is held: Android refuses the registration with a `SecurityException` otherwise
+  (read from the Android source, not tried).
 
 ## History of the background-listening increment
 
@@ -267,6 +352,22 @@ Two reviews of the port, before it reached the phone, changed this:
    over the media channel; a press during "Beende" opens the next session and its
    `session_voice_recognition_requested` says `accepted=true` (if not, the wait behind
    `session_link_down` is too short or looks at the wrong thing); `lara.STATUS` over adb.
+
+   With the same install, the calendar reminders. They do not depend on the remote, so check
+   them even if the points above make trouble. First the announcer, because every
+   announcement now runs through its new guard: "Ansage jetzt" and "Beende" after a tap are
+   still heard to the end (`announce_end result=ok`; a false alarm of the guard would read
+   `output_lost`). Then switch on "Termine ansagen" in the section "Kalender" and grant the
+   permission; the calendars are listed with the ticks the calendar app has; "Nächsten Termin
+   jetzt ansagen" is heard. **Press that button again and switch the hearing aid off in the
+   middle of the sentence: nothing may come out of the phone** (`announce_end` with
+   `output_going_away` or `output_lost`). An appointment created twelve minutes ahead shows
+   up as `calendar_plan reason=calendar_changed` and is announced ten minutes before it
+   begins, with the phone locked and dark (`calendar_alarm` has the lateness of the alarm); a
+   declined, a cancelled and an all-day appointment stay silent (`calendar_plan` counts
+   them); a reminder during a phone call waits (`calendar_waiting why=phone_call`); a tap
+   while a reminder is spoken cuts it off; nothing of a title is in the journal. The whole
+   list: `docs/design/kalender-ansagen.md`, "Am Gerät noch zu prüfen".
 2. Then measure: can a Shelly press open a session with the phone dark, after minutes and after
    hours? Expect trouble from Android 17's scan allowance
    (`scan_allowance_throttling_enabled=true` on this phone; effect unmeasured). Compare the idle
@@ -288,3 +389,17 @@ that Android delivers while the service is still busy is turned down (with a vib
 not started afterwards; a session cannot hear the remote if the listener service is not
 running and cannot be started; the router and the session programs have no unit tests of
 their own (their decisions are tested in `core`).
+
+Known gaps of the calendar reminders: a single occurrence of a series that is changed after
+its reminder is announced a second time; a reminder that waits for a session is tried every
+20 s, so one whose session ends in the last seconds before the appointment can be given up
+all the same; of two reminders that fall due together the second is lost if a session starts
+while the first is spoken (`announce_skipped why=session_busy`); what waited for the end of a
+session when the process ended gets no `calendar_gave_up` line (it shows up as
+`calendar_missed` if the process is back within the hour); the first plan after a process
+start reports as missed also what it could never have announced (an appointment entered
+after its begin while the process was gone); an announcement longer than 20 s is cut off
+(`announce_end result=timeout`); everything in `app/…/calendar`, the section on the screen
+and the announcer's guard have no unit tests of their own (the decisions are tested in
+`core`, the calls into Android are not), and how long a read of the calendar takes has not
+been measured.

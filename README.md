@@ -52,6 +52,7 @@ This repository is the app that answers them, and the notes on everything we lea
 | 🧪 | The same after hours of idle, and with the phone in a pocket | not measured yet |
 | 🔨 | **Remote to wake:** a listener service scans for the remote all day, and a press opens a session by itself and is the first thing announced | built, not measured yet |
 | 🔨 | One router for every trigger; a count session for measurement series; control over adb; day counters and journal sharing on the screen | built, not tried on the phone yet |
+| 🔨 | **Spoken calendar reminders:** ten minutes before an appointment the aid says "In 10 Minuten: Zahnarzt". Read from the phone's own calendar storage, so it covers every calendar that is synced to the phone; off until you switch it on | built, not measured yet |
 | 🗓 | Spoken menu, Hermes connection, media keys | planned |
 
 <sub>All measurements: 27 November 2026, one device, small samples. Numbers and conditions: <a href="docs/measurements/2026-11-27.md">docs/measurements</a>.
@@ -173,7 +174,9 @@ you build something similar.
 
 - **Only one hearing aid, chosen by you.** Sessions and announcements go to the device you
   selected, identified by its address. Never to a car kit, another headset or the phone speaker.
-  If the sound would go anywhere else, the app stays silent and writes down why.
+  If the sound would go anywhere else, the app stays silent and writes down why. An announcement
+  is watched until its last word and cut off if the hearing aid goes away or another device takes
+  the sound over on the way (built, not tried on the phone yet).
 - **The display stays off.** Nothing in the app asks for the screen.
 - **The microphone opens only after a deliberate trigger.** There is no wake word and no
   always-on listening.
@@ -199,6 +202,9 @@ you build something similar.
    - *Hörgerät*: pick which connected device is your hearing aid (*Wählen*).
    - optional, the remote: open *Shelly: Suchen und Live-Test*, start the scan, press a button on
      the remote and pick the line on which that press shows up (*Anlernen*).
+   - optional, calendar reminders: open *Kalender*, switch on *Termine ansagen* and allow the
+     app to read the calendar (`READ_CALENDAR`, asked for only then). Untick the calendars you
+     do not want to hear.
 3. With the phone **unlocked**, do the assistant gesture on the hearing aid once. Android shows a
    chooser: pick **Lara im Ohr** and **Always**.
 4. Lock the phone, let the display go dark, and tap again.
@@ -240,6 +246,7 @@ adb asks for it, and in the count session also on button 3.
 | Two low buzzes | something went wrong (in the hearing aid) |
 | A short double vibration | something went wrong before the link to the hearing aid was up, Android did not let the session start, a press came during a phone call, or a tap met a session that was still closing |
 | One soft tone, then speech | an unprompted announcement. Also "Beende" after you ended a session with a tap: the hearing aid has closed the voice link by then |
+| One soft tone, then "In 10 Minuten: Zahnarzt" | a calendar reminder, ten minutes before an appointment begins. "In 7 Minuten: …" if the app got to it late, "Jetzt: …" under a minute. Not while a session or a phone call runs: then it waits for that to end, at the longest until the appointment begins |
 
 ### The journal
 
@@ -254,9 +261,11 @@ adb logcat -s LaraJournal
 The screen leaves out one kind of line, `shelly_packet` (one per advertisement of the remote, a
 dozen or more per press); the files and logcat have them. *Heute teilen* and *Alle teilen* hand
 the journal files to Android's share sheet. That is the only way the journal leaves the phone,
-and it contains Bluetooth addresses and device names. *Zähler heute* counts presses, gaps, taps
-and sessions from today's file, and a line typed into *Marker fürs Protokoll* becomes a journal
-line of its own.
+and it contains Bluetooth addresses and device names. It never contains what an appointment is
+called, the name of a calendar or its account: of the calendar reminders it has counts, the
+numbers Android gives calendars and appointments, times and lengths only. *Zähler heute*
+counts presses, gaps, taps and sessions from today's file, and a line typed into *Marker fürs
+Protokoll* becomes a journal line of its own.
 
 For repeatable series the app can be driven from a computer: start a session, change a scan
 setting, write a marker, simulate a press. See [`docs/adb-control.md`](docs/adb-control.md).
@@ -281,7 +290,7 @@ compileSdk 37.2, minSdk 36, targetSdk 36 (switch with `-Plara.targetSdk=37`).
 
 | Path | What |
 |---|---|
-| `core/` | pure Kotlin, no Android imports: journal format, BTHome parser, press tracking with loss counting, routing decisions, count logic, adb parameters; 222 JVM tests |
+| `core/` | pure Kotlin, no Android imports: journal format, BTHome parser, press tracking with loss counting, routing decisions, count logic, adb parameters, planning and wording of the calendar reminders; 293 JVM tests |
 | `app/…/trigger` | the invisible activity that receives the hearing-aid tap |
 | `app/…/assistant` | the three services that make the app a digital assistant |
 | `app/…/input` | the router that turns every trigger into an action, and the tap setting |
@@ -289,9 +298,10 @@ compileSdk 37.2, minSdk 36, targetSdk 36 (switch with `-Plara.targetSdk=37`).
 | `app/…/shelly` | the remote: the listener service and its scans, the intake of its packets, search and live test, the remote session with spoken presses |
 | `app/…/speech` | spoken phrases, synthesised once and cached as audio for the voice link |
 | `app/…/announce` | unprompted announcements and the hourly test |
+| `app/…/calendar` | spoken reminders before appointments: reading the phone's calendar storage, the alarm, the choice of calendars |
 | `app/…/control` | the receiver for commands over adb |
 | `app/…/journal`, `app/…/ui` | journal, day counters, sharing; the one screen with its sections |
-| `docs/design/` | the design document for this version (German) |
+| `docs/design/` | the design document for this version and the one for the calendar reminders (German) |
 | `docs/measurements/` | what was measured on the device, with conditions |
 | `docs/research/` | the research and verification reports behind the design |
 | `docs/adb-control.md` | the commands for driving the app from a computer |
@@ -439,6 +449,7 @@ The streaming projects in this group use ASHA or LE Audio. The hearing aid used 
 - [x] Pocket remote: BTHome parsing, search and live test, spoken presses inside a session
 - [x] Pocket remote: listening in the background, so that a press can open a session (built, not measured yet)
 - [x] Input router, count session, control over adb, day counters, journal sharing (built, not tried on the phone yet)
+- [x] Spoken calendar reminders ten minutes before an appointment, from the phone's calendar storage (built, not measured yet)
 - [ ] Measurements: the remote as wake-up after minutes and hours of idle, in the pocket, per scan mode
 - [ ] Media keys as an extra trigger
 - [ ] Spoken menu: weather, appointments, to-dos

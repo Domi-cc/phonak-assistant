@@ -35,7 +35,7 @@ private val clock = SimpleDateFormat("HH:mm:ss.SSS", Locale.GERMANY)
  */
 private val badWords = listOf(
     "error", "refused", "timeout", "lost", "unbound", "failed", "dropped", "rejected", "gave_up", "unreadable", "unhandled",
-    "announce_skipped", "no_scan",
+    "announce_skipped", "no_scan", "no_permission", "calendar_missed", "calendar_test_skipped",
 )
 
 /**
@@ -71,6 +71,8 @@ private val addressFields = setOf("address", "replaced")
 private fun isBad(record: JournalRecord): Boolean =
     badWords.any { it in record.type } ||
         (record.type == "session_end" && record.fields["result"] != "ok") ||
+        // cut off, because the output changed or a session began, or the engine failed
+        (record.type == "announce_end" && record.fields["result"] != "ok") ||
         record.fields["problem"] != null ||
         listOf("missed", "missedBefore").any { key -> (record.fields[key] as? Number)?.let { it.toLong() > 0 } == true }
 

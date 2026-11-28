@@ -3,11 +3,14 @@ package io.github.domicc.lara.control
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import io.github.domicc.lara.LaraApp
 import io.github.domicc.lara.assistant.LaraVoiceInteractionService
 import io.github.domicc.lara.audio.SessionPrograms
 import io.github.domicc.lara.audio.SessionService
+import io.github.domicc.lara.calendar.CalendarStatus
 import io.github.domicc.lara.core.control.AdbArguments
 import io.github.domicc.lara.core.control.Rejected
 import io.github.domicc.lara.core.input.Input
@@ -15,6 +18,10 @@ import io.github.domicc.lara.core.input.InputPath
 import io.github.domicc.lara.core.input.InputSource
 import io.github.domicc.lara.input.InputRouter
 import io.github.domicc.lara.shelly.ListenerService
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Control from a computer, so that a series of measurements can be run and repeated without
@@ -34,6 +41,9 @@ import io.github.domicc.lara.shelly.ListenerService
  *
  * Nothing here plays anything itself. A session asked for from here goes through the router
  * and the session service like every other one, to the selected hearing aid or nowhere.
+ *
+ * What is said here about the calendar is numbers: no title, no calendar name and no account
+ * ever goes into an answer.
  */
 class AdbReceiver : BroadcastReceiver() {
 
@@ -44,6 +54,11 @@ class AdbReceiver : BroadcastReceiver() {
             "adb_command",
             mapOf("action" to intent.action, "extras" to extras.mapValues { it.value.toString() }, "origin" to InputSource.ADB.word),
         )
+        if (intent.action == ACTION_CALENDAR) {
+            // answers later, when the calendar has been read
+            calendar(app)
+            return
+        }
         val answer = try {
             "ok " + run(app, intent.action, extras)
         } catch (e: Rejected) {
@@ -98,6 +113,47 @@ class AdbReceiver : BroadcastReceiver() {
         return "simulated press button=${press.button} gesture=${press.gesture.name.lowercase()} missed=${press.missed} consumers=$consumers"
     }
 
+    /**
+     * Asks for a new plan of the calendar reminders and answers with its numbers. The plan
+     * reads the calendar on another thread, so the broadcast is kept open until it is through.
+     */
+    private fun calendar(app: LaraApp) {
+        val ordered = isOrderedBroadcast
+        val pending = goAsync()
+        val answered = AtomicBoolean()
+        /** @return false if the answer was given before */
+        fun answer(text: String): Boolean {
+            if (!answered.compareAndSet(false, true)) return false
+            if (ordered) pending.resultData = text
+            pending.finish()
+            return true
+        }
+        // Android allows a receiver a limited time; a plan that hangs must not use it up.
+        Handler(Looper.getMainLooper()).postDelayed(
+            {
+                val why = "no plan within ${CALENDAR_ANSWER_MS / 1000} s"
+                if (answer("error: $why; see calendar_* in the journal")) {
+                    app.journal.log("adb_rejected", mapOf("action" to ACTION_CALENDAR, "why" to why, "origin" to InputSource.ADB.word))
+                }
+            },
+            CALENDAR_ANSWER_MS,
+        )
+        app.calendar.requestPlan(InputSource.ADB.word) { answer("ok " + calendarNumbers(it)) }
+    }
+
+    private fun calendarNumbers(status: CalendarStatus): String {
+        val wake = status.wakeAtMs?.let { SimpleDateFormat("HH:mm", Locale.GERMANY).format(Date(it)) } ?: "none"
+        return "enabled=${status.enabled} permission=${status.permission} readable=${status.readable}" +
+            " calendars=${status.selected} events=${status.events} wake=$wake kind=${status.wakeKind?.word ?: "none"}"
+    }
+
+    /** The one word of `lara.STATUS` about the calendar reminders. */
+    private fun calendarWord(app: LaraApp): String = when {
+        !app.calendarStore.enabled.value -> "off"
+        !app.calendar.hasPermission() -> "no_permission"
+        else -> "on"
+    }
+
     private fun status(app: LaraApp): String {
         val prompts = app.prompts.status.value
         val hearingAid = when {
@@ -113,7 +169,8 @@ class AdbReceiver : BroadcastReceiver() {
             " sessionOpen=${ListenerService.sessionOpen}" +
             " assistantBound=${LaraVoiceInteractionService.ready}" +
             " hearingAid=$hearingAid" +
-            " prompts=${prompts.ready}/${prompts.total}"
+            " prompts=${prompts.ready}/${prompts.total}" +
+            " calendar=${calendarWord(app)}"
     }
 
     private fun settings(app: LaraApp): String {
@@ -137,5 +194,9 @@ class AdbReceiver : BroadcastReceiver() {
         const val ACTION_MARK = "lara.MARK"
         const val ACTION_PRESS = "lara.PRESS"
         const val ACTION_STATUS = "lara.STATUS"
+        const val ACTION_CALENDAR = "lara.CALENDAR"
+
+        /** How long `lara.CALENDAR` waits for the plan before it answers with an error. */
+        const val CALENDAR_ANSWER_MS = 8_000L
     }
 }

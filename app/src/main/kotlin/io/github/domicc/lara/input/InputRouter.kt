@@ -239,6 +239,12 @@ class InputRouter(private val app: LaraApp) {
             AudioManager.MODE_COMMUNICATION_REDIRECT,
         )
 
+        /**
+         * Whether [mode], what `AudioManager.mode` says, means a call, ringing included. Also
+         * asked by the calendar reminders, which do not talk into one either.
+         */
+        fun isCall(mode: Int): Boolean = mode in CALL_MODES
+
         /** What every journal line about an input says about it; `origin` is where it came from. */
         fun fields(input: Input): Map<String, Any?> = buildMap {
             put("origin", input.origin)

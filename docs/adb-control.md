@@ -1,6 +1,6 @@
 # Control over adb
 
-The app can be driven from a computer, so that a series of measurements can be run and repeated without touching the phone: start a session, change a scan setting, write a marker into the journal, pretend that a button of the remote was pressed.
+The app can be driven from a computer, so that a series of measurements can be run and repeated without touching the phone: start a session, change a scan setting, write a marker into the journal, pretend that a button of the remote was pressed, ask for a new plan of the calendar reminders.
 
 **State: built, not yet tried on the device.** The commands below are what the code expects. Whether Android 17 lets the adb shell deliver them as described is one of the things to check first (see "First check").
 
@@ -54,6 +54,7 @@ lara -a lara.MARK --es text "'ab jetzt 2 h Ruhe'"
 | `lara.MARK` | `--es text "..."` | Writes a `marker` line with this text into the journal. |
 | `lara.PRESS` | `--ei button 1..4` (default 1), `--es gesture <word>` (default `press`), `--ei missed 0..99` (default 0) | Simulates a press of the remote. See below. |
 | `lara.STATUS` | none | Changes nothing. Answers with the settings and the state of the app. |
+| `lara.CALENDAR` | none | Plans the calendar reminders anew, as a change in the calendar would, and answers with the numbers of that plan. See below. |
 
 `lara.REMOTE`, `lara.ECHO` and `lara.COUNT` answer `ok` as soon as the session is asked for. Whether it opened is in the journal: `session_link_up`, `session_end`, or `session_refused` and `session_busy` if it did not start. A session is busy until `session_link_down`, a moment after its `session_end`: wait for that line, or a second, before you ask for the next one.
 
@@ -113,7 +114,7 @@ A session that a simulated press opens is a real session with the hearing aid an
 ### The answer of `lara.STATUS`
 
 ```text
-ok idle=low_power session=balanced passive=true rescue=false refresh=0 wake=true tap=remote enrolled=true scan=low_power/passive listener=true sessionBusy=false sessionOpen=false assistantBound=true hearingAid=connected prompts=139/139
+ok idle=low_power session=balanced passive=true rescue=false refresh=0 wake=true tap=remote enrolled=true scan=low_power/passive listener=true sessionBusy=false sessionOpen=false assistantBound=true hearingAid=connected prompts=139/139 calendar=off
 ```
 
 Match the fields by name, not by position.
@@ -122,6 +123,29 @@ Match the fields by name, not by position.
 - `sessionBusy` is true from the moment a session is accepted until its link is closed and the hands-free audio is down. `sessionOpen` is true while that session listens to the remote (remote session or count session); `scan` keeps the session mode for 15 s longer.
 - `hearingAid` is `connected`, `not_connected` or `not_selected`. Without a selected hearing aid the app stays silent.
 - `prompts` is how many spoken phrases are ready; while some are missing the app plays tones instead.
+- `calendar` is the state of the spoken calendar reminders ("Termine ansagen"): `off`, `on`, or `no_permission` if they are switched on but the app may not read the calendar.
+
+### Calendar reminders: `lara.CALENDAR`
+
+Ten minutes before an appointment the app says "In 10 Minuten: Zahnarzt" into the hearing aid, if "Termine ansagen" is switched on in the section "Kalender". The rules are in [`docs/design/kalender-ansagen.md`](design/kalender-ansagen.md) (German). The switch and the choice of calendars are on the screen only; over adb you can ask for a new plan and read its numbers:
+
+```sh
+lara -a lara.CALENDAR
+```
+
+```text
+ok enabled=true permission=true readable=true calendars=2 events=3 wake=13:50 kind=reminder
+```
+
+- `calendars` is how many calendars are selected. `events` is how many appointments with a reminder in the next 24 hours could be announced at all (not begun, not all-day, not cancelled, not declined, calendar selected), whether or not they have been.
+- `wake` is when the app plans next, as a time of day, and `kind` says why: `reminder` (an announcement falls due), `retry` (an announcement waits for the end of a session or of a phone call and is tried again every 20 s), `look_again` (the app reads the calendar again; it never lets more than six hours pass without doing so, whether or not an announcement is planned) or `read_again` (the calendar could not be read; a new try, a minute after the first failure and less often after each further one). Both are `none` while the reminders are off or the permission is missing.
+- `readable=false` means the phone's calendar storage could not be read; the journal says more (`calendar_provider_error`). An alarm that was planned before stays where it was: `wake` is then that time, or the next try to read if that comes first.
+
+The answer comes when the calendar has been read. That is expected to take a fraction of a second; it has not been measured. A plan that finds an announcement waiting for a session which has just ended holds it back for another second. If the plan takes longer than 8 s the answer is an error, the journal has `adb_rejected`, and the plan may still follow. A calendar storage that does not answer is given 3 s per question (`calendar_provider_error` with `why=timeout`).
+
+A plan that finds an appointment due announces it, like every other plan. So this command can make the phone speak, into the selected hearing aid or nowhere.
+
+**The answer and the journal never contain what an appointment is called.** Titles, names of calendars and accounts stay out of both; the journal has counts, the numbers Android gives calendars and events, times and lengths (`calendar_plan`, `calendar_alarm`, `calendar_announce`, `calendar_missed`, and `announce_start` with `textLength` in place of the text). What each line means is in the design document, "Was im Protokoll steht".
 
 ## Following along
 
@@ -184,3 +208,4 @@ This path has not run on the phone yet. Before relying on it:
 1. `lara -a lara.STATUS` must answer with `data="ok ..."`, and `adb_command` must appear in the journal.
 2. `lara -a lara.MARK --es text "'test'"` must produce a `marker` line with `origin=adb`.
 3. With the phone locked and the display off, `lara -a lara.REMOTE` followed by `lara -a lara.PRESS` must be heard in the hearing aid as the start tones and "Taste 1 kurz".
+4. `lara -a lara.CALENDAR` must answer with its numbers after the plan has run, not with an empty `data`: the answer is given from another thread, a moment after the receiver has returned.

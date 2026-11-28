@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import io.github.domicc.lara.shelly.ListenerService
+import io.github.domicc.lara.ui.CalendarSection
 import io.github.domicc.lara.ui.CountersSection
 import io.github.domicc.lara.ui.HearingAidDialog
 import io.github.domicc.lara.ui.JournalPane
@@ -49,6 +50,7 @@ import io.github.domicc.lara.ui.SetupItem
 import io.github.domicc.lara.ui.SetupSection
 import io.github.domicc.lara.ui.SetupStatus
 import io.github.domicc.lara.ui.ShellySection
+import io.github.domicc.lara.ui.calendarSummary
 import io.github.domicc.lara.ui.countersSummary
 import io.github.domicc.lara.ui.setupSummary
 import io.github.domicc.lara.ui.shortAddress
@@ -57,8 +59,8 @@ import kotlinx.coroutines.launch
 
 /**
  * The only screen. Upper part: sections that fold and scroll (setup checklist, starting a
- * session or an announcement, today's counters, the remote, settings). Lower part: the live
- * journal, which stays visible whatever is open above it.
+ * session or an announcement, the calendar reminders, today's counters, the remote, settings).
+ * Lower part: the live journal, which stays visible whatever is open above it.
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -80,10 +82,12 @@ class MainActivity : ComponentActivity() {
      * Every time the app comes onto the screen, not only when the activity is created: the
      * permission the listener needs may have been granted in Android's settings in the
      * meantime, and nothing tells the app about that. Costs one journal line if it runs.
+     * The same goes for the permission to read the calendar.
      */
     override fun onStart() {
         super.onStart()
         ListenerService.start(this, "main_activity")
+        LaraApp.instance.calendar.onScreen()
     }
 }
 
@@ -97,6 +101,7 @@ private fun MainScreen(lifecycle: Lifecycle) {
     var choosingHearingAid by remember { mutableStateOf(false) }
     val today by app.counters.today.collectAsState()
     val remote by app.shellyStore.remote.collectAsState()
+    val calendar by app.calendar.status.collectAsState()
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -171,6 +176,7 @@ private fun MainScreen(lifecycle: Lifecycle) {
                         SetupSection(items, ::fix)
                     }
                     Section("Starten") { MeasureSection() }
+                    Section("Kalender", calendarSummary(calendar), startOpen = false) { CalendarSection() }
                     Section("Zähler heute", countersSummary(today), startOpen = false) { CountersSection() }
                     Section(
                         "Shelly: Suchen und Live-Test",

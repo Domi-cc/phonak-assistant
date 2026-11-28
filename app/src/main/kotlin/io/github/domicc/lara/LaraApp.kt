@@ -10,6 +10,8 @@ import io.github.domicc.lara.announce.HourlyAnnouncement
 import io.github.domicc.lara.audio.HeadsetLink
 import io.github.domicc.lara.audio.HearingAidStore
 import io.github.domicc.lara.audio.SessionService
+import io.github.domicc.lara.calendar.CalendarReminders
+import io.github.domicc.lara.calendar.CalendarStore
 import io.github.domicc.lara.core.input.Input
 import io.github.domicc.lara.input.InputRouter
 import io.github.domicc.lara.input.TapStore
@@ -71,6 +73,14 @@ class LaraApp : Application() {
     lateinit var counters: DayCounters
         private set
 
+    /** Whether appointments are announced, and of which calendars. */
+    lateinit var calendarStore: CalendarStore
+        private set
+
+    /** Spoken reminders ten minutes before an appointment. */
+    lateinit var calendar: CalendarReminders
+        private set
+
     private val inputBus = MutableSharedFlow<Input>(extraBufferCapacity = INPUT_BUFFER)
 
     /**
@@ -110,6 +120,8 @@ class LaraApp : Application() {
         tapStore = TapStore(this, journal)
         shelly = ShellyIntake(this, journal, shellyStore) { publish(it) }
         counters = DayCounters(journal)
+        calendarStore = CalendarStore(this, journal)
+        calendar = CalendarReminders(this, journal, calendarStore, announcer)
         // before anything can publish an input: the bus replays nothing
         router = InputRouter(this).also { it.start() }
         journal.log(
@@ -128,6 +140,7 @@ class LaraApp : Application() {
         )
         headset.connect()
         HourlyAnnouncement.ensureScheduled(this)
+        calendar.start()
         CoroutineScope(Dispatchers.Default).launch { SessionService.recoverAfterCrash(this@LaraApp) }
     }
 
