@@ -1,12 +1,14 @@
 package io.github.domicc.lara.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -74,5 +76,19 @@ fun SwitchRow(label: String, detail: String, checked: Boolean, onChange: (Boolea
             Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** A setting with a few values to choose from, each with the word the screen uses for it. */
+@Composable
+fun <T> ChoiceRow(label: String, detail: String, options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { (value, word) ->
+                FilterChip(selected = value == selected, onClick = { onSelect(value) }, label = { Text(word) })
+            }
+        }
     }
 }

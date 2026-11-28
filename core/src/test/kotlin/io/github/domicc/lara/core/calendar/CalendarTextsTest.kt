@@ -116,6 +116,21 @@ class CalendarTextsTest {
     }
 
     @Test
+    fun `the rehearsal is the reminder as it sounds ten minutes before the appointment`() {
+        assertEquals("In 10 Minuten: Zahnarzt", CalendarTexts.rehearsal(listOf("Zahnarzt")))
+        assertEquals("In 10 Minuten: Zahnarzt und Bank", CalendarTexts.rehearsal(listOf("Zahnarzt", "Bank")))
+        assertEquals(CalendarTexts.reminder(ReminderPlanner.LEAD_MS, listOf("Zahnarzt")), CalendarTexts.rehearsal(listOf("Zahnarzt")))
+    }
+
+    @Test
+    fun `without an appointment the rehearsal speaks a sample title`() {
+        assertEquals("Beispieltermin", CalendarTexts.SAMPLE_TITLE)
+        assertEquals("In 10 Minuten: Beispieltermin", CalendarTexts.rehearsal(null))
+        // an appointment without anything to name is no reason to stay silent either
+        assertEquals("In 10 Minuten: Beispieltermin", CalendarTexts.rehearsal(emptyList()))
+    }
+
+    @Test
     fun `the line of the test button says the time like the hourly announcement does`() {
         assertEquals("Nächster Termin um 14 Uhr 30: Zahnarzt", CalendarTexts.nextEvent(at(13), at(14, 30), listOf("Zahnarzt"), zone))
         assertEquals("Nächster Termin um 9 Uhr: Zahnarzt", CalendarTexts.nextEvent(at(8, 59), at(9), listOf("Zahnarzt"), zone))

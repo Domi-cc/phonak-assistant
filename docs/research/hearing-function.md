@@ -500,7 +500,7 @@ Bounded per session but not in sum: presses that keep coming chain sessions of u
 
 None of this is a command to the aid. It is what the phone does around a channel.
 
-- **Volume:** the app sets none. It reads the call volume for the journal (`audio/AudioLink.kt:120-121`). Tones have a fixed digital level (0.35 of full scale, `audio/Tones.kt:16`; the chime 0.25, `announce/Announcer.kt:258`) and play at whatever call or media volume the phone has.
+- **Volume:** the app sets none. (True for the code that was audited. A later build of the same day can set the phone's media volume around an announcement, a gain in the phone and no command to the aid; see [announce-volume.md](announce-volume.md).) It reads the call volume for the journal (`audio/AudioLink.kt:120-121`). Tones have a fixed digital level (0.35 of full scale, `audio/Tones.kt:16`; the chime 0.25, `announce/Announcer.kt:258`) and play at whatever call or media volume the phone has.
 - **Audio mode:** never set; read to keep presses and reminders out of a call (`input/InputRouter.kt:177`, `calendar/CalendarReminders.kt:272`). Android itself may change the mode while a voice link is up.
 - **Audio focus in a session:** `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE` with usage voice communication (`audio/AudioLink.kt:130-143`). Other apps' playback, for example a podcast streamed to the aid, pauses for the whole session; released in `close()`.
 - **Audio focus in an announcement:** `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` with usage assistant (`announce/Announcer.kt:118-121`). Other media is ducked, or paused if the other app chooses to, for up to 20.78 s; released in a `finally`.

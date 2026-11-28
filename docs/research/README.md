@@ -51,3 +51,4 @@ Written after the two passes. The warning above holds for these too.
 | Report | Question |
 |---|---|
 | [hearing-function.md](hearing-function.md) | 28 November 2026: does a sound channel from the phone get in the way of the hearing aid's own job? What the aid does while streaming, how long Android keeps a stream open, every audio path of the app, and the tests on the ear. Three reports, each re-checked, in one document |
+| [announce-volume.md](announce-volume.md) | 28 November 2026: what decides how loud an announcement is in the hearing aid, and what may the app set? Android 17's separate assistant volume, no absolute volume for this aid, what Android drops without a word, where volumes are remembered, the volume keys, what could be boosted, Phonak's side, and the checks on the phone. Three reports, each re-checked, and a design critique, in one document |

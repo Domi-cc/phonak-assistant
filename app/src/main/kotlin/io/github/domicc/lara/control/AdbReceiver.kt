@@ -11,7 +11,9 @@ import io.github.domicc.lara.assistant.LaraVoiceInteractionService
 import io.github.domicc.lara.audio.SessionPrograms
 import io.github.domicc.lara.audio.SessionService
 import io.github.domicc.lara.calendar.CalendarStatus
+import io.github.domicc.lara.core.announce.StoredStep
 import io.github.domicc.lara.core.control.AdbArguments
+import io.github.domicc.lara.core.control.LevelChange
 import io.github.domicc.lara.core.control.Rejected
 import io.github.domicc.lara.core.input.Input
 import io.github.domicc.lara.core.input.InputPath
@@ -40,7 +42,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * `simulated` through everything it causes, and does not touch the counters of the remote.
  *
  * Nothing here plays anything itself. A session asked for from here goes through the router
- * and the session service like every other one, to the selected hearing aid or nowhere.
+ * and the session service like every other one, to the selected hearing aid or nowhere, and
+ * the rehearsal of a reminder through the announcer.
  *
  * What is said here about the calendar is numbers: no title, no calendar name and no account
  * ever goes into an answer.
@@ -89,16 +92,34 @@ class AdbReceiver : BroadcastReceiver() {
         }
         ACTION_PRESS -> press(app, extras)
         ACTION_STATUS -> status(app)
+        ACTION_REHEARSE -> {
+            // like "Erinnerung testen" on the screen; what became of it is in the journal
+            app.calendar.rehearse(InputSource.ADB.word)
+            "rehearsal asked for"
+        }
         else -> throw Rejected("unknown action $action; see docs/adb-control.md")
     }
 
     /** Changes the settings that are named and leaves the others as they are. */
     private fun set(app: LaraApp, extras: Map<String, Any?>): String {
         // everything is checked before anything is changed: half a command must not apply
-        val change = AdbArguments.settings(extras, app.shellyStore.scan.value)
+        val maxStep = app.volume.maxStep()
+        val change = AdbArguments.settings(extras, app.shellyStore.scan.value, maxLevel = maxStep)
         app.shellyStore.setScan(change.scan)
         change.wake?.let(app.shellyStore::setWakes)
         change.tap?.let(app.tapStore::setProgram)
+        val origin = InputSource.ADB.word
+        change.channel?.let { app.volume.store.setChannel(it, origin) }
+        change.leadIn?.let { app.volume.store.setLeadIn(it, origin) }
+        when (val level = change.level) {
+            null -> Unit
+            LevelChange.Off -> app.volume.setOwnLevel(false, origin)
+            is LevelChange.Step -> {
+                // stored only: the phone's volume is written when an announcement plays
+                app.volume.store.setStep(StoredStep(level.step, maxStep), origin)
+                app.volume.setOwnLevel(true, origin)
+            }
+        }
         return settings(app)
     }
 
@@ -170,13 +191,25 @@ class AdbReceiver : BroadcastReceiver() {
             " assistantBound=${LaraVoiceInteractionService.ready}" +
             " hearingAid=$hearingAid" +
             " prompts=${prompts.ready}/${prompts.total}" +
-            " calendar=${calendarWord(app)}"
+            " calendar=${calendarWord(app)}" +
+            mediaVolume(app)
+    }
+
+    /**
+     * The phone's media volume right now. The step is the hearing aid's only while
+     * `mediaToAid=true`; with another output it is that one's.
+     */
+    private fun mediaVolume(app: LaraApp): String {
+        val live = app.volume.live()
+        return " mediaStep=${live.mediaStep}/${live.mediaMax} mediaMuted=${live.mediaMuted} mediaToAid=${live.mediaToAid}"
     }
 
     private fun settings(app: LaraApp): String {
         val scan = app.shellyStore.scan.value
+        val announce = app.volume.store.settings.value
         return "idle=${scan.idle.word} session=${scan.session.word} passive=${scan.passive} rescue=${scan.rescue}" +
-            " refresh=${scan.refreshMinutes} wake=${app.shellyStore.wakes.value} tap=${app.tapStore.program.value.word}"
+            " refresh=${scan.refreshMinutes} wake=${app.shellyStore.wakes.value} tap=${app.tapStore.program.value.word}" +
+            " channel=${announce.channel.word} level=${announce.own?.on(app.volume.maxStep())?.step ?: "off"} leadin=${announce.leadIn.ms}"
     }
 
     /** The extras with whatever type `am` gave them; the typed getters would hide a mistyped flag. */
@@ -195,6 +228,7 @@ class AdbReceiver : BroadcastReceiver() {
         const val ACTION_PRESS = "lara.PRESS"
         const val ACTION_STATUS = "lara.STATUS"
         const val ACTION_CALENDAR = "lara.CALENDAR"
+        const val ACTION_REHEARSE = "lara.REHEARSE"
 
         /** How long `lara.CALENDAR` waits for the plan before it answers with an error. */
         const val CALENDAR_ANSWER_MS = 8_000L

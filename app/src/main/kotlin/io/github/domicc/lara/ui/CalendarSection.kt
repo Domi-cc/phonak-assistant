@@ -8,7 +8,9 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -26,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.SoundEffectOnInteraction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.domicc.lara.LaraApp
@@ -54,8 +57,11 @@ private fun clock(atMs: Long): String = CalendarTexts.clock(System.currentTimeMi
 
 /**
  * The spoken reminders before appointments: the switch, the permission to read the calendar,
- * which calendars are announced, what is said next, and a button that speaks the next
- * appointment at once, to hear what a reminder sounds like.
+ * which calendars are announced, what is said next, a button that speaks the next
+ * appointment at once, to hear that the app reads the calendars the owner means, and the
+ * button "Erinnerung testen", which plays a reminder exactly as it will sound ten minutes
+ * before the next appointment. That one is always there, also while the reminders are off:
+ * it is how the owner tries out how loud a reminder is.
  *
  * This is the one place where titles of appointments and names of calendars are shown. They
  * are not in the journal below it.
@@ -89,7 +95,10 @@ fun CalendarSection() {
     }
     // the rest describes the last plan; right after the switch or the start of the app that
     // plan is still on its way
-    if (!enabled || !status.enabled || !status.planned) return
+    if (!enabled || !status.enabled || !status.planned) {
+        TestButtons(withNext = false)
+        return
+    }
 
     if (!status.permission) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -114,6 +123,7 @@ fun CalendarSection() {
                 },
             ) { Text(if (refused) "Einstellungen" else "Erlauben") }
         }
+        TestButtons(withNext = false)
         return
     }
 
@@ -143,10 +153,34 @@ fun CalendarSection() {
         )
     }
 
-    OutlinedButton(
-        onClick = { app.calendar.announceNext(InputSource.SCREEN.word) },
-        modifier = Modifier.padding(top = 4.dp),
-    ) { Text("Nächsten Termin jetzt ansagen") }
+    TestButtons(withNext = true)
+}
+
+/**
+ * The buttons that speak at once, next to each other where the screen has the room.
+ * "Erinnerung testen" does not click: Android's click sound for a press would go into the
+ * hearing aid right in front of the reminder that is to be judged.
+ *
+ * @param withNext also "Nächsten Termin jetzt ansagen", which needs the calendar and so is
+ * only offered while the reminders are on and may read it
+ */
+@Composable
+private fun TestButtons(withNext: Boolean) {
+    val app = LaraApp.instance
+    FlowRow(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (withNext) {
+            OutlinedButton(onClick = { app.calendar.announceNext(InputSource.SCREEN.word) }) { Text("Nächsten Termin jetzt ansagen") }
+        }
+        SoundEffectOnInteraction(enabled = false) {
+            OutlinedButton(onClick = { app.calendar.rehearse(InputSource.SCREEN.word) }) { Text("Erinnerung testen") }
+        }
+    }
+    Text(
+        "„Erinnerung testen“ spielt die Erinnerung so, wie sie zehn Minuten vor dem nächsten Termin klingt; " +
+            "ohne Termin oder ohne Kalender mit „Beispieltermin“. Wie laut: Abschnitt „Ansagen“.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /** One calendar with its tick; the whole line takes the touch. */

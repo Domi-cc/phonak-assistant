@@ -263,6 +263,66 @@ class CalendarReminders(
     }
 
     /**
+     * The button "Erinnerung testen": plays the reminder for the next appointment exactly as
+     * it will sound ten minutes before it, "In 10 Minuten: Zahnarzt", through the same call
+     * of the announcer as a real reminder. For trying out how loud and how clear a reminder
+     * is without waiting for one. So that there is always something to hear, it speaks the
+     * same sentence with the title "Beispieltermin" when it has no appointment to name:
+     * the reminders are switched off (then the calendar is not touched), the permission is
+     * missing, the calendar cannot be read, or the next day holds nothing.
+     *
+     * Changes nothing about what is planned or remembered, and writes no title anywhere:
+     * `calendar_test` with `kind=rehearsal` has the count, whether the sample title was
+     * used and why, and the length of the text.
+     *
+     * @param origin where the request came from, for the journal
+     */
+    fun rehearse(origin: String) {
+        scope.launch {
+            try {
+                // not into a session or a call; the announcer is told the same rule
+                holdBack()?.let {
+                    journal.log("calendar_test_skipped", mapOf("origin" to origin, "kind" to KIND_REHEARSAL, "why" to it))
+                    return@launch
+                }
+                val now = System.currentTimeMillis()
+                var noEvent: String? = null
+                var next: Reminder? = null
+                when {
+                    !store.enabled.value -> noEvent = "switched_off"
+                    !reader.hasPermission() -> noEvent = "no_permission"
+                    else -> {
+                        // the reader journals why it could not read
+                        val calendars = reader.calendars()
+                        val instances = if (calendars == null) null else reader.instances(now, now + ReminderPlanner.WINDOW_MS)
+                        if (calendars == null || instances == null) {
+                            noEvent = "unreadable"
+                        } else {
+                            next = ReminderPlanner.nextEvent(now, instances, selected(calendars))
+                            if (next == null) noEvent = "no_event"
+                        }
+                    }
+                }
+                val text = CalendarTexts.rehearsal(next?.titles)
+                journal.log(
+                    "calendar_test",
+                    mapOf(
+                        "origin" to origin,
+                        "kind" to KIND_REHEARSAL,
+                        "events" to (next?.keys?.size ?: 0),
+                        "sample" to (next == null),
+                        "sampleWhy" to noEvent,
+                        "textLength" to text.length,
+                    ),
+                )
+                announcer.announce(text, REASON_REHEARSAL, logText = false, stopIf = ::holdBack)
+            } catch (e: Exception) {
+                journal.log("calendar_plan_error", mapOf("reason" to KIND_REHEARSAL, "exception" to e.javaClass.name))
+            }
+        }
+    }
+
+    /**
      * Why nothing may be spoken right now, or null: a session has the voice link, or the
      * phone is in a call or rings. The router keeps a press of the remote out of a call for
      * the same reason. The word goes into the journal.
@@ -550,6 +610,12 @@ class CalendarReminders(
         /** The reason the announcer journals for a reminder, and for the line of the test button. */
         const val REASON = "calendar"
         const val REASON_TEST = "calendar_test"
+
+        /** The reason the announcer journals for "Erinnerung testen". */
+        const val REASON_REHEARSAL = "calendar_rehearsal"
+
+        /** What tells the line of "Erinnerung testen" from that of "Nächsten Termin jetzt ansagen". */
+        const val KIND_REHEARSAL = "rehearsal"
 
         /** How long after the last reported change the calendar is read. */
         const val CHANGE_SETTLE_MS = 3_000L

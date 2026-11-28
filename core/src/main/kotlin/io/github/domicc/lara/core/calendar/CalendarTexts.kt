@@ -26,6 +26,9 @@ object CalendarTexts {
     /** The line of the test button when the next day holds nothing. */
     const val NO_EVENT = "Kein Termin in den nächsten 24 Stunden"
 
+    /** What the rehearsal of a reminder names when there is no appointment to name. */
+    const val SAMPLE_TITLE = "Beispieltermin"
+
     /** Blanks, line breaks, tabs, control characters and the blanks of other scripts, in a row. */
     private val gaps = Regex("[\\s\\p{Z}\\p{Cc}]+")
 
@@ -93,6 +96,16 @@ object CalendarTexts {
         }
         return "$lead: ${join(titles)}"
     }
+
+    /**
+     * The line of the button "Erinnerung testen": the reminder exactly as it is spoken ten
+     * minutes before an appointment, "In 10 Minuten: Zahnarzt". Without an appointment to
+     * name it is "In 10 Minuten: Beispieltermin", so that there is always something to hear.
+     *
+     * @param titles of the next appointment, cleaned, see [titles]; null or empty if there is none
+     */
+    fun rehearsal(titles: List<String>?): String =
+        reminder(ReminderPlanner.LEAD_MS, titles.orEmpty().ifEmpty { listOf(SAMPLE_TITLE) })
 
     /**
      * The line of the test button: "Nächster Termin um 14 Uhr 30: Zahnarzt", with "morgen"

@@ -1,6 +1,6 @@
 # Control over adb
 
-The app can be driven from a computer, so that a series of measurements can be run and repeated without touching the phone: start a session, change a scan setting, write a marker into the journal, pretend that a button of the remote was pressed, ask for a new plan of the calendar reminders.
+The app can be driven from a computer, so that a series of measurements can be run and repeated without touching the phone: start a session, change a scan setting, set how announcements are played and how loud, write a marker into the journal, pretend that a button of the remote was pressed, ask for a new plan of the calendar reminders, play a reminder as a test.
 
 **State: built, not yet tried on the device.** The commands below are what the code expects. Whether Android 17 lets the adb shell deliver them as described is one of the things to check first (see "First check").
 
@@ -32,7 +32,7 @@ lara -a lara.STATUS
 The answer is the last line that `am` prints:
 
 ```text
-Broadcast completed: result=0, data="ok idle=low_power session=balanced passive=true rescue=false refresh=0 wake=true tap=remote ..."
+Broadcast completed: result=0, data="ok idle=low_power session=balanced passive=true rescue=false refresh=0 wake=true tap=remote channel=media level=off leadin=450 ..."
 ```
 
 `data` starts with `ok` or with `error:` followed by the reason. A line without `data` means that the broadcast did not reach the app; see "If nothing happens".
@@ -55,6 +55,7 @@ lara -a lara.MARK --es text "'ab jetzt 2 h Ruhe'"
 | `lara.PRESS` | `--ei button 1..4` (default 1), `--es gesture <word>` (default `press`), `--ei missed 0..99` (default 0) | Simulates a press of the remote. See below. |
 | `lara.STATUS` | none | Changes nothing. Answers with the settings and the state of the app. |
 | `lara.CALENDAR` | none | Plans the calendar reminders anew, as a change in the calendar would, and answers with the numbers of that plan. See below. |
+| `lara.REHEARSE` | none | Plays the reminder for the next appointment as it sounds ten minutes before it, like "Erinnerung testen" on the screen. See below. |
 
 `lara.REMOTE`, `lara.ECHO` and `lara.COUNT` answer `ok` as soon as the session is asked for. Whether it opened is in the journal: `session_link_up`, `session_end`, or `session_refused` and `session_busy` if it did not start. A session is busy until `session_link_down`, a moment after its `session_end`: wait for that line, or a second, before you ask for the next one.
 
@@ -71,16 +72,21 @@ Every session ends the same way: after 30 s without a press, on a long press of 
 | `--ez passive` | `true`, `false` | "Passive Scan-Art"; `false` is Android's default scan type |
 | `--ez rescue` | `true`, `false` | "Rettungs-Scan" |
 | `--ei refresh` | minutes, 0 to 1440 | How often the scans are registered anew as a precaution; 0, the default, switches that off. Not on the screen. See the warning below. |
+| `--es channel` | `media`, `assistant` | "Lautstärke-Kanal": which of Android's volumes an announcement is played under. The default is `media`. See "How loud announcements are" below. |
+| `--es level` | `off`, or a step from 1 to the phone's highest media step (`--ei level 18` works too) | "Eigene Lautstärke nur für Ansagen". A number switches it on with that step; `off` switches it off and keeps the step. Never 0. Only applied in the channel `media`: with `channel=assistant` the step is stored and shown, and the app sets nothing. |
+| `--ei leadin` | `450`, `1500`, `3000` (milliseconds) | "Vorlauf vor der Ansage": the silence in front of the chime of an announcement |
 
 ```sh
 lara -a lara.SET --es idle low_power --es session low_latency
 lara -a lara.SET --ez rescue true --ez wake false
 lara -a lara.SET --es tap count
+lara -a lara.SET --es level 18 --ei leadin 1500
+lara -a lara.SET --es channel assistant
 ```
 
 **`refresh` changes what you measure.** Registering anew means stopping the running scan and starting another. In the Android 17.0 source a scan books its use of the hourly scan allowance only when a delayed job fires (after 6 minutes in `low_latency`, after 24 minutes in `balanced`), and stopping the scan cancels that job. With `refresh` below those times a scan is never throttled, and a catch rate measured that way says nothing about Android's limits. The alarm behind `refresh` also wakes a dozing phone. So: keep `refresh` at 0 for measurements, or treat it as one more thing you vary, and compare catch rates only between runs with the same value. Every `scan_started` line carries it as `refreshMinutes`. Without the refresh the scans are still registered anew when Bluetooth comes back, when the process starts and when the app is updated.
 
-Every change is journaled (`scan_settings`, `shelly_wakes`, `tap_setting`), and a running listener applies a changed scan setting at once (`scan_started`). Android allows an app only a few scan starts per half minute. If you change modes faster than that, the app waits and journals `scan_deferred`; leave a few seconds between two changes. Opening a session that listens to the remote costs one scan start (`reason=session_open`). The way back costs another one, 15 s after the session has closed (`reason=session_closed`); a session that opens within those 15 s finds the scan still in session mode and costs none. Lines of the remote from those 15 s carry the session mode in `mode` and `session=false`.
+Every change is journaled (`scan_settings`, `shelly_wakes`, `tap_setting`, `announce_setting`), and a running listener applies a changed scan setting at once (`scan_started`). Android allows an app only a few scan starts per half minute. If you change modes faster than that, the app waits and journals `scan_deferred`; leave a few seconds between two changes. Opening a session that listens to the remote costs one scan start (`reason=session_open`). The way back costs another one, 15 s after the session has closed (`reason=session_closed`); a session that opens within those 15 s finds the scan still in session mode and costs none. Lines of the remote from those 15 s carry the session mode in `mode` and `session=false`.
 
 ### Simulated presses
 
@@ -114,7 +120,7 @@ A session that a simulated press opens is a real session with the hearing aid an
 ### The answer of `lara.STATUS`
 
 ```text
-ok idle=low_power session=balanced passive=true rescue=false refresh=0 wake=true tap=remote enrolled=true scan=low_power/passive listener=true sessionBusy=false sessionOpen=false assistantBound=true hearingAid=connected prompts=139/139 calendar=off
+ok idle=low_power session=balanced passive=true rescue=false refresh=0 wake=true tap=remote channel=media level=off leadin=450 enrolled=true scan=low_power/passive listener=true sessionBusy=false sessionOpen=false assistantBound=true hearingAid=connected prompts=139/139 calendar=off mediaStep=15/25 mediaMuted=false mediaToAid=true
 ```
 
 Match the fields by name, not by position.
@@ -124,6 +130,30 @@ Match the fields by name, not by position.
 - `hearingAid` is `connected`, `not_connected` or `not_selected`. Without a selected hearing aid the app stays silent.
 - `prompts` is how many spoken phrases are ready; while some are missing the app plays tones instead.
 - `calendar` is the state of the spoken calendar reminders ("Termine ansagen"): `off`, `on`, or `no_permission` if they are switched on but the app may not read the calendar.
+- `channel`, `level` and `leadin` are the settings of the section "Ansagen", as `lara.SET` takes them. `level` is `off` or the step the app sets for an announcement in the channel `media`; with `channel=assistant` a step is shown here too, but the app sets no volume in that channel.
+- `mediaStep` is the phone's media volume right now, as step/highest step. It is the hearing aid's only while `mediaToAid=true`, which means that Android would send media to the selected hearing aid and to nothing else; with another output the step is that output's. `mediaMuted=true` means that media are muted, by hand or by Do Not Disturb: announcements in the channel `media` are then silent.
+
+### How loud announcements are
+
+Since Android 17, sound played as assistant speech has a volume of its own that an app cannot set and that the media volume does not move. So announcements are played as media by default (`channel=media`) and follow the phone's media volume for the hearing aid. `channel=assistant` plays them as the builds before did. The background, and what of it is untested: [`CLAUDE.md`](../CLAUDE.md), "How loud an announcement is", and [`docs/measurements/lautstaerke.md`](measurements/lautstaerke.md) (German, step by step).
+
+- `level=off`: announcements play at the phone's media volume as it is, and the app writes nothing. Over adb that volume can be set with Android's own command, for example `adb shell cmd media_session volume --stream 3 --set 18` (not tried on this phone); it acts on whatever is the media output at that moment.
+- `level=18`: before each announcement the app sets step 18 of the media volume, and puts the phone's value back half a second after the last word (at once if the announcement was cut off; not at all, for the time being, if the hearing aid is gone or going: then it is put back when the aid is the output again). Only while the hearing aid alone is the media output, and not while the stream is muted, during a call, or while other media play. `lara.SET` only stores the step; nothing is written until an announcement plays.
+- A step beyond the phone's scale is rejected (`level must be off or a step from 1 to 25`).
+
+What happened is in the journal, once per announcement: `announce_volume` (`action` is `kept`, `set`, `already`, `skipped` or `refused`, with `why`; `mBefore`, `mWanted`, `mGot`, `mMax` are steps of the media volume, the hearing aid's only while `mRoute=aid`; `governing` is the stream Android puts the announcement under, 3 for media and 11 for the assistant volume), `announce_volume_mid` half a second into the speech (none for a speech shorter than that), and, if the app set or looked after the volume, `announce_volume_restore` (`restored`, `adopted` if the volume keys were pressed during the announcement, `left_muted`, `deferred_route`, `deferred_going_away`, `nothing_to_restore`, `restore_refused`). `volume_state` is written at the start of the app and whenever the app looks at a value it has not put back for good: two seconds after every restore (`trigger=restore_check`, expected `leftover=confirmed`), and when the hearing aid may be the output again. All words: [`CLAUDE.md`](../CLAUDE.md), "The instrument".
+
+There is no command for the spoken sample of the screen's slider. `lara.REHEARSE` plays an announcement of the length of a real reminder and takes the same way.
+
+### Rehearsing a reminder: `lara.REHEARSE`
+
+```sh
+lara -a lara.REHEARSE
+```
+
+Plays "In 10 Minuten: <title of the next appointment>" into the hearing aid, through the same code as a real reminder: the reminder exactly as it will sound ten minutes before that appointment. If there is no appointment in the next 24 hours, if the reminders are switched off, if the permission is missing or the calendar cannot be read, it says "In 10 Minuten: Beispieltermin" instead, so that there is always something to hear. With the reminders off it does not touch the calendar. It changes nothing about what is planned or remembered.
+
+The answer is `ok rehearsal asked for`, at once. What became of it is in the journal: `calendar_test` with `kind=rehearsal`, `events`, `sample` (true if the sample title was used, with `sampleWhy`) and `textLength`, then the lines of the announcement with `reason=calendar_rehearsal`. During a session or a phone call nothing is played (`calendar_test_skipped`). The title is in neither the answer nor the journal.
 
 ### Calendar reminders: `lara.CALENDAR`
 
@@ -209,3 +239,5 @@ This path has not run on the phone yet. Before relying on it:
 2. `lara -a lara.MARK --es text "'test'"` must produce a `marker` line with `origin=adb`.
 3. With the phone locked and the display off, `lara -a lara.REMOTE` followed by `lara -a lara.PRESS` must be heard in the hearing aid as the start tones and "Taste 1 kurz".
 4. `lara -a lara.CALENDAR` must answer with its numbers after the plan has run, not with an empty `data`: the answer is given from another thread, a moment after the receiver has returned.
+5. `lara -a lara.REHEARSE` must be heard in the hearing aid as a chime and "In 10 Minuten: …", and the journal must show `announce_volume` in front of `announce_start`.
+6. `lara -a lara.SET --es level 20` followed by `lara -a lara.REHEARSE`, with the phone locked and the display off: `announce_volume` must read `action=set` with `mGot` equal to `mWanted` (or `already`), `announce_volume_restore` must read `result=restored`, and two seconds later `volume_state` must read `trigger=restore_check leftover=confirmed`. An `action=refused` here means that Android does not take a volume from this app in the background.

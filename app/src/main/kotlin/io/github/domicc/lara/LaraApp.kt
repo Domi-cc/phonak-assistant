@@ -5,6 +5,8 @@ import android.app.Application
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Process
+import io.github.domicc.lara.announce.AnnounceVolume
+import io.github.domicc.lara.announce.AnnounceVolumeStore
 import io.github.domicc.lara.announce.Announcer
 import io.github.domicc.lara.announce.HourlyAnnouncement
 import io.github.domicc.lara.audio.AidChannels
@@ -41,6 +43,13 @@ class LaraApp : Application() {
         private set
 
     lateinit var headset: HeadsetLink
+        private set
+
+    /**
+     * How loud an announcement is: the settings of the section "Ansagen", the phone's media
+     * volume around an announcement, and what the journal learns about Android's volumes.
+     */
+    lateinit var volume: AnnounceVolume
         private set
 
     /** Unprompted speech over the media channel. */
@@ -122,7 +131,8 @@ class LaraApp : Application() {
         journal = Journal(this)
         hearingAid = HearingAidStore(this)
         headset = HeadsetLink(this, journal, hearingAid)
-        announcer = Announcer(this, journal, headset)
+        volume = AnnounceVolume(this, journal, hearingAid, AnnounceVolumeStore(this, journal))
+        announcer = Announcer(this, journal, headset, volume)
         channels = AidChannels(this, journal, headset, announcer)
         prompts = PromptCache(this, journal)
         countSounds = CountSounds(prompts)
@@ -154,6 +164,10 @@ class LaraApp : Application() {
         // `aid_channels_watching` or `aid_channels_no_permission` anyway. Later days have
         // neither: the process lives on, and the owner shares single days.
         journal.dayFields = { mapOf("aidChannelsWatching" to channels.watching) }
+        // After `process_start`, and before anything can announce: a media volume that a
+        // process before this one changed for an announcement and could not put back is put
+        // back here, if the hearing aid is the output.
+        volume.start()
         HourlyAnnouncement.ensureScheduled(this)
         calendar.start()
         // Undispatched: the recovery reads its flag here and now, before any session of this

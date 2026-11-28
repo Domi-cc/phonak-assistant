@@ -1,5 +1,7 @@
 package io.github.domicc.lara.core.control
 
+import io.github.domicc.lara.core.announce.AnnounceChannel
+import io.github.domicc.lara.core.announce.LeadIn
 import io.github.domicc.lara.core.input.Gesture
 import io.github.domicc.lara.core.input.TapProgram
 import io.github.domicc.lara.core.scan.ScanConfig
@@ -7,6 +9,7 @@ import io.github.domicc.lara.core.scan.ScanMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AdbArgumentsTest {
@@ -71,6 +74,53 @@ class AdbArgumentsTest {
         assertEquals(1440, settings("refresh" to 1440).scan.refreshMinutes)
         assertEquals("refresh must be 0 to 1440 (minutes)", rejected { settings("refresh" to -5) })
         assertEquals("refresh must be 0 to 1440 (minutes)", rejected { settings("refresh" to 1441) })
+    }
+
+    @Test
+    fun `the settings of the announcements are left alone unless they are named`() {
+        val change = settings("idle" to "balanced")
+        assertNull(change.channel)
+        assertNull(change.level)
+        assertNull(change.leadIn)
+    }
+
+    @Test
+    fun `channel, own level and lead-in of the announcements can be set`() {
+        assertEquals(AnnounceChannel.ASSISTANT, settings("channel" to "assistant").channel)
+        assertEquals(AnnounceChannel.MEDIA, settings("channel" to "media").channel)
+        assertEquals(LevelChange.Off, settings("level" to "off").level)
+        assertEquals(LevelChange.Step(18), settings("level" to 18).level)
+        // --es where --ei was meant
+        assertEquals(LevelChange.Step(18), settings("level" to "18").level)
+        assertEquals(LeadIn.MEDIUM, settings("leadin" to 1500).leadIn)
+        assertEquals(LeadIn.LONG, settings("leadin" to "3000").leadIn)
+        assertEquals(LeadIn.SHORT, settings("leadin" to 450).leadIn)
+    }
+
+    @Test
+    fun `the settings of the announcements are checked like the others`() {
+        assertEquals("channel must be one of media assistant", rejected { settings("channel" to "music") })
+        assertEquals("level must be off or a step from 1", rejected { settings("level" to 0) })
+        assertEquals("level must be off or a step from 1", rejected { settings("level" to "loud") })
+        assertEquals("level must be off or a step from 1", rejected { settings("level" to -2) })
+        assertEquals("leadin must be one of 450 1500 3000 (milliseconds)", rejected { settings("leadin" to 500) })
+        assertEquals("leadin must be a whole number", rejected { settings("leadin" to "long") })
+        // one bad value rejects the good ones in front of it
+        rejected { settings("channel" to "media", "level" to "x") }
+    }
+
+    @Test
+    fun `a step beyond the phone's scale is rejected when the scale is known`() {
+        assertEquals(LevelChange.Step(25), AdbArguments.settings(mapOf("level" to 25), current, maxLevel = 25).level)
+        assertEquals(
+            "level must be off or a step from 1 to 25",
+            rejected { AdbArguments.settings(mapOf("level" to 26), current, maxLevel = 25) },
+        )
+        assertEquals(
+            "level must be off or a step from 1 to 25",
+            rejected { AdbArguments.settings(mapOf("level" to 0), current, maxLevel = 25) },
+        )
+        assertEquals(LevelChange.Off, AdbArguments.settings(mapOf("level" to "off"), current, maxLevel = 25).level)
     }
 
     @Test

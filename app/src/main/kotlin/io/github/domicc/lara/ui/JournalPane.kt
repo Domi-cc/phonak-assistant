@@ -67,12 +67,22 @@ fun JournalPane(modifier: Modifier = Modifier) {
  */
 private val addressFields = setOf("address", "replaced")
 
+/** How a restore of the media volume ends when the phone's value is not back. */
+private val volumeNotBack = setOf("restore_refused", "deferred_route", "deferred_going_away", "left_muted", "error")
+
 /** A failure, or a loss: the two things a measurement looks for are shown in the error colour. */
 private fun isBad(record: JournalRecord): Boolean =
-    badWords.any { it in record.type } ||
+    // a loudness sample that gave way to a newer one is neither
+    if (record.fields["why"] == "superseded" || record.fields["result"] == "superseded") false
+    else badWords.any { it in record.type } ||
         (record.type == "session_end" && record.fields["result"] != "ok") ||
         // cut off, because the output changed or a session began, or the engine failed
         (record.type == "announce_end" && record.fields["result"] != "ok") ||
+        // Android did not take the step for an announcement, or the phone's value is not back
+        (record.type == "announce_volume" && record.fields["action"] == "refused") ||
+        (record.type == "announce_volume_restore" && record.fields["result"] in volumeNotBack) ||
+        (record.type == "volume_state" && record.fields["leftover"] == "restore_refused") ||
+        (record.type == "volume_slider" && record.fields["result"] == "refused") ||
         record.fields["problem"] != null ||
         listOf("missed", "missedBefore").any { key -> (record.fields[key] as? Number)?.let { it.toLong() > 0 } == true }
 

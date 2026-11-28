@@ -51,7 +51,10 @@ paths above take through the code:
 **Built after that, on 28 November 2026, not yet on the phone either** (the branch
 `calendar-reminders`, on top of `background-listener`; design:
 [`docs/design/kalender-ansagen.md`](docs/design/kalender-ansagen.md)). It compiles, lint reports no errors
-and the core tests pass; nothing of it has run on a device:
+and the core tests pass. When this was written nothing of it had run on a device; since then
+the owner has reported on a reminder he heard (see "The owner's first word on the calendar
+reminders" below; which build that was is inferred, not said), and nothing else of it is
+confirmed:
 
 - `calendar/CalendarReminders`: spoken reminders for appointments. Ten minutes before one begins
   the announcer says "In 10 Minuten: Zahnarzt" over the media channel. The appointments come
@@ -98,6 +101,42 @@ device:
   `lastEnded`), has a second entry `playSilence`, and its chime is played by a helper that
   the silence test shares.
 
+**The owner's first word on the calendar reminders.** He reports: "Terminerinnerung viel zu
+leise". So a reminder has been heard in the hearing aid. Which build that was he did not say:
+presumably the one tagged `apk/20`, the newest APK he has and the first with the reminders.
+That is an inference from the tag, to be confirmed by him. Nothing else of that build is
+confirmed here, and no journal of it has been read.
+
+**Built in answer to that, not yet on the phone** (the same branch; why and how: "How loud an
+announcement is" below). It compiles, lint reports no errors and the core tests pass; nothing
+of it has run on a device:
+
+- A section "Ansagen" on the screen. The **volume channel** of the announcements is a setting,
+  and its default changed: chime and speech are now played as media and follow the phone's
+  media volume. Before, they were played as assistant speech, and Android 17 keeps a volume of
+  its own for that, which an app cannot set and which stood low on his phone. A slider in the
+  real steps of the media volume, with a spoken sample ("Lautstärke Stufe 18") when it is let
+  go. A switch "Eigene Lautstärke nur für Ansagen": the app sets its own step for the length
+  of an announcement and puts the phone's value back. The silence in front of an announcement
+  as a setting, for an ear test.
+- `announce/AnnounceVolume` carries that out, and for the first time **the app writes a
+  volume**: the phone's media volume, and only with that switch on or when the owner moves the
+  slider. What it may touch, what it puts back, what it remembers until the value is back for
+  good and when it looks again is decided in `core/announce/AnnounceVolumeRules`, with tests.
+- "Erinnerung testen" in the section "Kalender", and `lara.REHEARSE` over adb: the reminder
+  for the next appointment exactly as it sounds ten minutes before it, or with the title
+  "Beispieltermin" if there is none to name.
+- New journal lines that measure what the source could not tell: `announce_volume`,
+  `announce_volume_mid`, `announce_volume_seen`, `announce_volume_restore`, `volume_state`,
+  `volume_curve`, `announce_setting`, `volume_slider`.
+- **`announce/Announcer` changed with it, and that is a measured path.** What an announcement
+  is played with is chosen per announcement, and the default is another usage than the one
+  that was heard on the phone, with a flag that keeps other apps from recording it. The
+  volume step sits between the last check of the output and the request for the audio focus,
+  the guard lets `AnnounceVolume` read the volume at each of its looks, the restore is in the
+  block that ends every announcement, and the wake lock lasts 35 s at most instead of 25.
+- The steps for the owner: [`docs/measurements/lautstaerke.md`](docs/measurements/lautstaerke.md).
+
 **Not built:** media keys, spoken menu, Hermes connection, speech recognition.
 
 ## Decisions the owner made
@@ -111,6 +150,13 @@ device:
 - The count session (running numbers instead of words) is a measurement tool he did not ask for. It stays available for series, from the screen and over adb, but it is never what a tap or a press starts by default.
 - The hearing aid is chosen once, by him, on the screen; the remote is searched and picked on the screen. Addresses are shown shortened there.
 - A spoken reminder ten minutes before an appointment: "In 10 Minuten: <Titel>". "Erstmal einfach": one fixed lead time, nothing to configure. The appointments come from the calendars on the phone (Google Calendar and whatever else is synced there), and which calendars are announced can be ticked on the screen.
+- **Announcements have to be loud enough, and how loud is his to set.** His words:
+  "Terminerinnerung viel zu leise, wir brauchen die Möglichkeit diese Durchsagen von der
+  Lautstärke anzupassen", and he asked for "ein Testbutton um die nächste Eventansage zu
+  simulieren". That is the request. (He did not name the build he heard; see the state
+  above.) How it was answered (the volume channel, the app's own
+  step with its restore, the sample, the button "Erinnerung testen") was decided by the
+  agents from the research; he has not seen it yet. "How loud an announcement is" has it.
 - **Titles of appointments never go into the journal**, and neither do descriptions, locations, names of calendars or account names (those are e-mail addresses). He shares the journal for analysis, and it also goes to logcat. Counts, ids, times and lengths only; the same holds for adb answers and for exception texts. On the phone's own screen they may be shown.
 - The signing key lives in GitHub Actions secrets; GitHub builds the signed APKs. The key is not copied to other machines.
 - The app shows its build number, and every APK he gets has a higher one than the last. He tests without a computer next to him and names the build when he reports. How that is kept: "Build, install, release" below.
@@ -187,8 +233,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
   or "Heute teilen" on the screen). Every line has three clocks and the phone state (screen, lock,
   Doze, role, binding, scan). The screen leaves out `shelly_packet` (one line per advertisement);
   logcat and the files have it.
-- The app can be driven over adb (start a session, change scan settings, write a marker, simulate
-  a press, ask for the status, ask for a new plan of the calendar reminders):
+- The app can be driven over adb (start a session, change scan settings and the settings of the
+  announcements, write a marker, simulate a press, ask for the status, ask for a new plan of the
+  calendar reminders, rehearse a reminder):
   [`docs/adb-control.md`](docs/adb-control.md). Not tried on the phone yet.
 - Useful system tags: `HeadsetService`, `HeadsetStateMachine`, `ActivityTaskManager`,
   `AS.AudioDeviceBroker`, `BtScan.ScanManager`. More commands: README, "Debugging toolkit".
@@ -201,20 +248,20 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 | Path | What |
 |---|---|
-| `core/` | pure Kotlin, 339 JVM tests: build label, journal format and names, BTHome parser, press tracking with loss counting, input model, routing (`Routing`, `WaitingInputs`), count logic, scan settings and start budget, adb parameters, day statistics with the channel times and their wording (`DayStats`, `ChannelTexts`), what a look at a voice link that stayed up does (`audio/StuckVoiceLink`), WAV reading, resampling, silence trimming, the calendar reminders (`calendar`: `ReminderPlanner`, `CalendarChoice`, the spoken lines in `CalendarTexts`) |
+| `core/` | pure Kotlin, 471 JVM tests: build label, journal format and names, BTHome parser, press tracking with loss counting, input model, routing (`Routing`, `WaitingInputs`), count logic, scan settings and start budget, adb parameters, day statistics with the channel times and their wording (`DayStats`, `ChannelTexts`), what a look at a voice link that stayed up does (`audio/StuckVoiceLink`), WAV reading, resampling, silence trimming, the calendar reminders (`calendar`: `ReminderPlanner`, `CalendarChoice`, the spoken lines in `CalendarTexts`), the loudness of announcements (`announce`: the settings, the rules for the media volume around an announcement in `AnnounceVolumeRules`, the lines of the screen in `AnnounceTexts`) |
 | `app/…/trigger` | the invisible activity for the hearing-aid tap; hands the voice button of other devices on |
 | `app/…/assistant` | the three assistant services; `onReady` starts the listener and warms the phrases |
 | `app/…/input` | `InputRouter` (the only caller of `SessionService.start`), `TapStore` |
 | `app/…/audio` | `AudioLink` (the voice link), `SessionService`, `SessionPrograms`, `EchoProgram`, `CountProgram`, `HearingAidStore`, tones, `AidChannels` (when a sound channel to the hearing aid is really open; the follow-up of a voice link that stays up) |
 | `app/…/shelly` | `ShellyStore`, `ListenerService` with `RemoteScan`, `ListenerStarter` and `RescueScanReceiver`, `ShellyIntake` (packets to presses to the input bus), `ForegroundScan` (search and live test), `RemoteProgram`, phrases, tone fallback |
 | `app/…/speech` | `PromptCache` with `SpeechEngine`, the phrase lists (`Prompts`), `CountSounds` |
-| `app/…/announce` | unprompted announcements over the media channel, with the guard that cuts one off when its output changes; hourly test; the silence test |
+| `app/…/announce` | unprompted announcements over the media channel, with the guard that cuts one off when its output changes; hourly test; the silence test; `AnnounceVolume` and `AnnounceVolumeStore` (how loud an announcement is: the settings, the phone's media volume around an announcement, the journal lines about Android's volumes) |
 | `app/…/calendar` | `CalendarReminders` (plans, announces, owns the one alarm and the observer), `CalendarReader` (the phone's calendar storage), `CalendarStore` (switch, choice of calendars, what was announced), `CalendarAlarmReceiver` |
 | `app/…/control` | `AdbReceiver` |
 | `app/…/journal`, `app/…/ui` | journal, day counters, sharing; setup checklist and the sections of the one screen |
 | `docs/design/` | design document for version 0.1 (German); its "Nachtrag" overrides the older text. `kalender-ansagen.md`: the calendar reminders |
-| `docs/measurements/` | what was measured on the device. `hoerprobe.md`: the ear test, step by step, for the owner (German) |
-| `docs/research/` | AI research and verification reports; leads, not facts. `hearing-function.md`: what a sound channel does to the hearing aid, with every source |
+| `docs/measurements/` | what was measured on the device. `hoerprobe.md`: the ear test, step by step, for the owner (German). `lautstaerke.md`: the loudness of the announcements, step by step, for the owner (German) |
+| `docs/research/` | AI research and verification reports; leads, not facts. `hearing-function.md`: what a sound channel does to the hearing aid, with every source. `announce-volume.md`: what decides the loudness of an announcement, with every source |
 | `docs/adb-control.md` | the adb commands |
 | `docs/release.md` | signed builds, releases, the key |
 
@@ -323,6 +370,15 @@ Worth knowing before changing anything there:
   them out of `toString`; `PhoneCalendar` and `CalendarStatus` are no data classes for the same
   reason; the announcer is called with `logText = false` and journals `textLength`; exceptions
   are journaled by class name, without their message. Keep to that with every new journal line.
+- **"Erinnerung testen" is no reminder.** `CalendarReminders.rehearse` speaks
+  `CalendarTexts.rehearsal`: the sentence of a reminder ten minutes ahead, with the titles of
+  the next appointment in the window, through the same call of the announcer as a real one
+  (`logText = false`, the same `stopIf`). Without an appointment to name it says
+  "In 10 Minuten: Beispieltermin": while the reminders are off (the calendar is not touched
+  then), without the permission, when the calendar cannot be read, and when the next day
+  holds nothing. It plans nothing and remembers nothing. Its journal line is `calendar_test`
+  with `kind=rehearsal`, `events`, `sample`, `sampleWhy` and `textLength`; the announcer's
+  reason is `calendar_rehearsal`. "Nächsten Termin jetzt ansagen" is unchanged.
 - **Off means off.** While "Termine ansagen" is off the app does not touch the calendar
   storage. The observer for changes is registered only while the feature is on and the
   permission is held: Android refuses the registration with a `SecurityException` otherwise
@@ -340,9 +396,11 @@ comes from.
 
 **What is known**
 
-- *Code.* The app has no command for the aid's amplification and sets no volume and no audio
-  mode. All it does to the aid is open one of two sound channels: the media channel (A2DP)
-  for an announcement, the voice link (hands-free) for a session.
+- *Code.* The app has no command for the aid's amplification and sets no audio mode. All it
+  does to the aid is open one of two sound channels: the media channel (A2DP) for an
+  announcement, the voice link (hands-free) for a session. When this was checked it set no
+  volume either. Since then it can set one, the phone's media volume, which is a gain in the
+  phone and no command to the aid: "How loud an announcement is".
 - *Phonak.* Every channel makes the aid leave its hearing program for a streaming program
   and return afterwards (knowledge base, not specific to the EON). The names of the programs
   are from the EON's product information: "Media speech + mic" and "Media music + mic" for
@@ -362,8 +420,11 @@ comes from.
   standby, forced to at least 3 s for A2DP). For ordinary PCM playback there is no
   supported way to shorten that; whether another kind of output would close sooner on this
   phone is unknown (hearing-function.md, A3.a). One announcement therefore holds the stream
-  for about (`announce_end` minus `announce_start`) + 3 s, roughly 6 to 7 s. The phone's own
-  sounds (notification, touch and lock sounds) open the same stream with the same 3 s.
+  for about (`announce_end` minus `announce_start`) + 3 s, roughly 6 to 7 s with the lead-in
+  of 0.45 s that every build so far had. Since the lead-in is a setting, 1.5 s or 3 s add
+  about 1 s or 2.5 s to that for every announcement (`leadInMs` in `announce_start`). The
+  phone's own sounds (notification, touch and lock sounds) open the same stream with the
+  same 3 s.
 - *Android 17 source (`A2dpStateMachine`).* Every time a device's media profile connects,
   Android reports "not playing" for it, with "playing" as the state before, although no
   stream was open.
@@ -519,6 +580,276 @@ behaviour is unchanged:
 The ear test and a day of the journal's numbers come first: they say what each of the first
 three costs.
 
+## How loud an announcement is
+
+The owner's report was "Terminerinnerung viel zu leise" (presumably about the build tagged
+`apk/20`; he did not name it), with the request to make the loudness of the announcements
+adjustable. A research pass, each report checked again by a
+second reader, read the Android 17 source (tag `android-17.0.0_r1`) and captures from his
+phone of 27 November 2026. The full report with every source:
+[`docs/research/announce-volume.md`](docs/research/announce-volume.md). The phone runs a later
+build than the public source, **nothing of what was built from it has run on the phone, and
+nobody has listened yet.** This is the short form; every statement says where it comes from.
+Three things below are not in that report: the Bluetooth stack's condition in point 3 and
+the points 8 and 9 were read from the same source tag in the review of this build.
+
+Two words that must not be mixed up. The **media channel** is the Bluetooth path (A2DP) every
+announcement takes to the hearing aid, as opposed to the voice link. The **volume channel** is
+new: which of Android's volumes an announcement is played under. Both volume channels use the
+media channel.
+
+**What is known**
+
+1. *Android 17 source, Google's release notes, captures from the phone.* Android 17 gives
+   sound that is played as assistant speech (`USAGE_ASSISTANT`) a volume of its own:
+   `STREAM_ASSISTANT`, stream 11, steps 0 to 15, default 5, apart from the media volume.
+   Every build before this one played chime and speech that way. On the phone that stream stood at
+   5, then 13, then 8 of 15 on 27 November. By the curve in the public source those are about
+   -28.5, -5 and -18.5 dB under full level. What moved it were the hearing aid's own
+   hands-free volume reports during a voice session. An ordinary app
+   cannot set stream 11: that takes `MANAGE_ASSISTANT_AUDIO`, a permission of the assistant
+   role, and whether a sideloaded holder of the role is granted it is untested. On this
+   phone the media volume has no effect on such an announcement. Not shown by any capture:
+   that the phone's own, closed policy table puts this app's announcement under stream 11
+   as the public source does. The journal now asks (`governing`, and `musicActive` in
+   `announce_volume_mid`).
+2. *Captures from the phone.* The hearing aid takes no absolute volume from the phone
+   (AVRCP). So every volume on the phone is a digital gain in the phone's mixer, applied
+   per track, by the curve of that track's volume group at that group's step. The highest
+   step is 0 dB, and that is the loudest the phone can send.
+3. *Android 17 source.* An app can set the media volume, `setStreamVolume(STREAM_MUSIC,
+   step, 0)`, without a permission. The call acts on the output the media are routed to at
+   the moment of the call; there is no call for a named device. The step is set inside the
+   call, so reading it right afterwards tells whether the call was taken. It is dropped
+   without an error by Android 17's background hardening (this app, as the selected
+   assistant, is at the state of a bound foreground service, which passes; untried), by Do
+   Not Disturb that mutes media, by a user restriction, and on devices with a fixed volume.
+   A muted stream reads as 0, and writing another step unmutes it; the step under the mute
+   stays and comes back with the unmute. The value is saved per kind of device after 500 ms
+   and remembered per Bluetooth device by the Bluetooth stack, which hands it back to
+   Android at the next connection. **The Bluetooth stack takes a new value only for the
+   device that is its active media device at that moment**
+   (`AvrcpTargetService`, on Android's report of a changed media volume). When the hearing
+   aid is switched off or put into its charger, the stack lets go of it first and tells
+   Android afterwards (`A2dpService.removeActiveDevice`); Android then sends its notice
+   that the output is going and keeps the aid as the route for one more second
+   (`BECOMING_NOISY_DELAY_MS`) if something plays or holds the audio focus. A write in that
+   second is taken by Android, reads back, and is forgotten: at the next connection the
+   Bluetooth stack hands back the value from before it.
+4. *Android 17 source.* With flags 0 such a call shows no panel, plays no sound and does not
+   wake the screen.
+5. *Android 17 source, inferred and untried.* While a track of the media volume group plays,
+   the phone's volume keys change the media volume, also with the display off. For a track
+   played as assistant speech they do not: with the display off the keys only act on media.
+6. *Android 17 source.* The gains of the speech engine and of an app's own track end at 1.0.
+   Nothing in the public API makes a track louder than its volume allows.
+7. *Unknown.* Whether the hearing aid fades a stream in while it changes into its streaming
+   program. Wearers of earlier Phonak generations report 2 to 3 s for the change (forums).
+   In the journals of 27 November the first word came about 1.1 s after the stream opened,
+   and the whole announcement was over about 2.6 s later. Only the ear can tell.
+8. *Android 17 source.* Sound played as media can be recorded by another app that the owner
+   lets capture the screen with its sound (a screen recorder, a screen share in a video
+   call); sound played as assistant speech cannot. The copy for such a capture is a second
+   output that the question for the route does not show (`AudioPolicyManager`: "secondary
+   not used for audible audio routing, only used for duplication for playback capture"). A
+   track that is built with `ALLOW_CAPTURE_BY_NONE` is left out of it. The flag takes no
+   part in choosing the route or the volume.
+9. *Android 17 source.* Under a request for the audio focus that may duck, Android turns the
+   music of other apps down by about 35 dB if the request is made as an assistant, and by
+   about 14 dB for every other usage (`PlaybackActivityMonitor`).
+
+**What was built from it** (28 November 2026, not yet on the phone)
+
+- **The volume channel is a setting, "Lautstärke-Kanal", and its default is "Medien".** Chime,
+  silence test and speech are then played with `USAGE_MEDIA` and follow the phone's media
+  volume, which the owner sets with the ordinary slider and with the keys (point 5: also
+  during an announcement, in the pocket) and which the hearing aid does not rewrite.
+  "Assistent" is `USAGE_ASSISTANT`, exactly what the builds before did: a way back without
+  a new build, and something to compare with. In that channel the app never writes a volume.
+  The choice is read when it is an announcement's turn, and everything of that announcement
+  uses the same attributes: both tracks, the speech engine (set before every `speak`), the
+  request for the audio focus, and every question about the output.
+- **Played as media, an announcement may not be recorded by anybody** (point 8): the media
+  attributes carry `ALLOW_CAPTURE_BY_NONE`, for the app's own track and, because the
+  attributes travel to the speech engine, for the speech. A reminder speaks the title of an
+  appointment, and the guard could not see a recording. The attributes of the channel
+  "Assistent" are left exactly as the builds before had them; Android never lets that usage
+  be recorded. Untried on the phone: that the speech engine keeps the flag, and that
+  `governing` and `routeTypes` in `announce_volume` read the same as without it.
+- **Played as media, an announcement goes where the phone's media go.** With "Dieses
+  Smartphone" chosen in Android's output switcher the announcer finds the wrong output and
+  skips (`announce_skipped why=output_is_not_the_hearing_aid`, with `channel=media`). That
+  nothing is ever played on anything but the selected hearing aid stands above everything
+  here.
+- **Two ways to set the loudness, one switch: "Eigene Lautstärke nur für Ansagen".**
+  - *Off (the default).* Announcements play at the phone's media volume for the hearing aid
+    as it is. The app writes nothing around an announcement. The slider on the screen shows
+    that volume and sets it, for good, like the volume keys (`volume_slider`); it can be
+    moved only while the hearing aid alone is the media output, the stream is not muted and
+    the volume is not fixed.
+  - *On.* The slider holds a step of the app's own, from 1 to Android's maximum, stored with
+    the maximum it was chosen against and rescaled if that ever differs. Around each
+    announcement the app sets that step and puts the phone's value back.
+- **The volume step of an announcement** (`AnnounceVolume.before`, the rules in
+  `core/announce/AnnounceVolumeRules`): one slice of the main thread without a suspension,
+  after the announcer's second check of the output and before the audio focus, so that the
+  value stands before the lead-in silence opens the stream. The media output must be the
+  selected hearing aid's A2DP device alone; that is asked right before every read and
+  every write and never judged from a volume. The app does not touch the volume, and the
+  announcement plays at the phone's value, in the assistant channel, when Android does not
+  put the announcement under the media volume, with a fixed volume, with a muted stream or
+  step 0, in a call or any audio mode but the normal one, while other media play (they
+  would be lifted with the announcement), and for the silence test. Otherwise: the phone's
+  value is written into a note in storage, with the step that is about to be set, **before**
+  the write; then one write, read back. A value that reads back as wanted is accepted.
+  Anything else is a refusal, classed by what the app can see (`dnd`, `user_restriction`,
+  `unknown`; `other` for a third value, which is noted and put back like a step of the
+  app's; `muted` if the stream reads 0 after the write), with one attempt and no second.
+- **While the announcement plays** the guard's look at the output, five times a second, is
+  also a look at the volume (`AnnounceVolume.watch`): a value the volume keys changed
+  (point 5) is written into the note at once (`announce_volume_seen`), so that the note
+  names what stands also if the route is lost before the restore.
+- **The restore** (`AnnounceVolume.after`), for every way an announcement can end (the last
+  word, the guard, the timeout, an exception, a cancellation), before the audio focus is
+  given back and while the wake lock holds. Half a second after the last word if the
+  announcement was spoken to its end; at once if it was cut off, because then nothing is
+  on its way and whatever cut it is about to take the route. The route first, and without
+  the hearing aid nothing is written and the note stays (`deferred_route`). **An
+  announcement that ended because Android said the output is going
+  (`output_going_away`) counts as a lost route although the aid still reads as the route**
+  (`deferred_going_away`): by point 3 a write in that second would be forgotten. A muted
+  stream is left muted, and the note waits for the unmute (`left_muted`). A value that is
+  no longer the one the app set was changed with the volume keys during the announcement
+  and **becomes the new step** (`adopted`), also when the restore itself is put off. The
+  phone's value is put back and read back.
+- **A restore that reads back is not yet back for good** (point 3). The note is not cleared
+  but marked as restored, with the value that stood before, and a look two seconds later
+  (`volume_state trigger=restore_check`) clears it if the hearing aid is still the media
+  output (`leftover=confirmed`): an aid that was on its way out at the write is gone by
+  then. If it is gone, the note waits, and when the aid comes back with the old step, the
+  owner's value is put back once more, this time while the Bluetooth stack listens. The
+  same marking and the same second look follow every put-back by a look.
+- **A note that waits** (the process died, the hearing aid went away, a session or a call
+  took the route, media were muted, or Android did not take the restore) is looked at only
+  while the hearing aid alone is the media output and media are not muted. If the value is
+  the one the note names as set, the owner's value is put back; if the owner's value
+  stands, a marked note is cleared; if it is another value, the note is dropped. With any
+  other output nothing is compared and nothing written. The occasions: **every
+  announcement** (one that sets its own step uses the note itself; one that does not, with
+  the switch off, in the other channel, while other media play or for the silence test,
+  looks at it in the same moment and puts the owner's value back before it plays), the
+  start of the app, the app coming onto the screen, the section "Ansagen" being opened, a
+  changed setting, and, only while a note waits, about a second after any audio device
+  came or went, after the audio mode went back to normal, after the device for calls
+  changed, after a voice link went down (the end of a session) and after Do Not Disturb
+  changed. The route comes back from a session or a call without the aid's media device
+  being added, which is why its arrival alone is not enough. For these looks the phone is
+  kept awake for the second or two they wait.
+- **The app never** calls `adjustStreamVolume` or `setStreamMute`, never writes a stream
+  other than media, never passes flags other than 0, never writes step 0, and never writes
+  stream 11. `MANAGE_ASSISTANT_AUDIO` is declared in the manifest for one reason: so that
+  `volume_state` tells whether Android grants it to this app.
+- **The sample.** Letting go of the slider plays "Lautstärke Stufe 18" through
+  `Announcer.announce` with the reason `volume_sample`: the same checks, the same write,
+  the same guard, the same restore. Only the newest sample plays. The line under the
+  slider says what happened when the sample is over, not before: "Gespielt mit Stufe 18",
+  that Android did not take the change and why, or "Abgebrochen: …" if it was cut off. If
+  Android does not put announcements under the media volume on this phone (`governing` is
+  not 3), the status line and that line say so instead of naming a step.
+- **The lead-in** is a setting for the ear test of point 7: the silence in front of the
+  chime, 0.45 s (as before), 1.5 s or 3 s.
+- **"Erinnerung testen"** in the section "Kalender" plays the reminder for the next
+  appointment as it sounds ten minutes before it (`CalendarReminders.rehearse`).
+
+**The limits**
+
+- The highest step is the loudest the phone can send (point 2). If that is still too quiet,
+  no volume helps. What is left then is the acoustician, who can raise the gain of the
+  aid's streaming programs, or a digital boost in the app (playing the speech itself,
+  normalised, or a loudness effect), which was deliberately left out of this build. The
+  chime is at a quarter of full scale (`chimeAmplitude` in `announce_start`) and was not
+  changed either.
+- With the switch on, the phone's media volume really is raised for about four seconds per
+  announcement. The Bluetooth stack remembers that value for the hearing aid at once, and
+  Android saves it half a second later. The restore, the note and the look that confirms
+  the restore are what stands between that and the owner's music at the loudness of an
+  announcement.
+- Between the question for the output and the write there is a gap that no app can close.
+- Do Not Disturb that mutes media mutes the announcements, in both channels (by the source
+  the assistant usage is muted with the media), and no setting of the app changes that. In
+  the channel "Medien" the status line says that media are muted and that Do Not Disturb is
+  on, without claiming which caused which. In the channel "Assistent" the app cannot see a
+  mute; the line only says that Do Not Disturb is on.
+- **Other apps' music is turned down less under an announcement in the channel "Medien"**
+  (point 9): about 14 dB instead of the 35 dB the builds before got, because the request
+  for the audio focus carries the announcement's attributes. With the switch on the app
+  also leaves the volume alone while other media play. An announcement over music is
+  therefore harder to follow than before. Kept as designed; to be judged by ear, against
+  the channel "Assistent".
+- **A longer lead-in costs hearing time.** With 3 s the hearing aid stays in its streaming
+  program about 2.5 s longer for every announcement, the hourly one and every reminder, for
+  as long as the setting stays. The longer values are for the ear test; afterwards the
+  shortest that sounds right. The line on the screen says so.
+- During the lead-in and the chime the guard's question for the output is answered by the
+  app's own track, which is tied to the hearing aid (see the KDoc of `OutputGuard`): a
+  change of the media output that leaves the aid connected is only seen when the chime is
+  over. With a lead-in of 3 s that stretch is 3.3 s long.
+
+**The instrument**
+
+- `announce_start` now carries `channel`, `leadInMs` and `chimeAmplitude`.
+- `announce_volume`, once per announcement, before the lead-in: `channel`; `governing` (the
+  stream Android puts this announcement under: 3 is media, 11 the assistant volume);
+  `setting` (`phone` or the step); `action` (`kept`: the switch is off; `set`; `already`;
+  `skipped`; `refused`) and `why` (for `skipped`: `silence_test`, `assistant_channel`,
+  `not_music_stream`, `route_not_aid`, `volume_fixed`, `muted`, `mode_not_normal`,
+  `other_media`, `note_not_saved`, `error`; for `refused`: `dnd`, `user_restriction`,
+  `unknown`, `other`, `muted`); `mRoute` (the media output as a word, see `route` below:
+  the media values of the line are the hearing aid's only while it says `aid`, which in the
+  channel "Assistent" it need not); `mBefore`, `mWanted`, `mGot`, `mMax`, `mMuted` for media;
+  `aIndex`, `aMax` for stream 11; `mDb`, `aDb`, what those steps are worth in decibels on a
+  Bluetooth media device by the phone's own curve; `zen` (Do Not Disturb), `mode`,
+  `routeTypes`, `note` (`none`, `used`, `dropped`, `pending`), and, when the announcement
+  looked at a note it did not use, `leftover` (the words of `volume_state`). If Android
+  threw on the way, `exception` stands next to what was done.
+- `announce_volume_mid`, half a second into the speech: `musicActive`, `mRoute`, `mNow`,
+  `aNow`. With nothing else playing, `musicActive=true` means the speech really is under
+  the media volume, `false` that it is not. This is the check of point 1 on the phone
+  itself. A speech that is over within that half second leaves no such line.
+- `announce_volume_seen`, while an announcement plays whose volume the app set: the media
+  step changed (`mWas`, `mNow`), which is the volume keys. With its time it shows that a
+  key press reached the announcement.
+- `announce_volume_restore`, only for an announcement whose volume the app took into its
+  care (`action` was `set` or `already`, or `refused` with `why=other`): `result`
+  (`restored`, `adopted`, `left_muted`, `deferred_route`, `deferred_going_away`,
+  `nothing_to_restore`, `restore_refused`, or `error` with `exception`), `mNow`, `mBack`,
+  `waitedMs`, `note` (what stays in storage: `none`, `pending`, or `to_confirm` after a
+  restore that read back), and for an adopted step `oldStep` and `newStep`.
+- `volume_state` whenever the app looks at a note, whether there is one or not (`trigger`:
+  `app_start`; `aid_route`, a second after the hearing aid's media device appeared, which
+  also shows the value the Bluetooth stack handed back; `restore_check`, two seconds after
+  a restore or a put-back; `going_check`, three seconds after an announcement that ended
+  with `output_going_away`; `announcement`; `devices`, `mode`, `communication_device`,
+  `voice_link`, `dnd`, each a second after that changed and only while a note waits;
+  `screen`, when the app comes onto the screen; `section`, when the section "Ansagen" is
+  opened; `setting`): the settings, `route` (`aid`, `other`, `none`, `no_aid_selected`),
+  both volumes, `manageAssistantAudio` (`granted` or `denied`), the Android build, `note`
+  (`none`, `pending`, `to_confirm`, with `noteBefore` and `noteSet`), and `leftover` (what
+  became of it: `none`; `restored`, the owner's value was put back; `confirmed`, a restore
+  held and the note is cleared; `dropped`; `waiting_route`; `waiting_unmute`;
+  `waiting_check`, a restore too fresh to be confirmed; `restore_refused`; `announcing`
+  while an announcement still looks after it itself; `error` with `exception`).
+- `volume_curve`, once per Android build (remembered across updates of the app): the
+  decibels of every step of both volumes for a Bluetooth media device. The numbers in
+  point 1 are the public source's, not the phone's.
+- `announce_setting` for every change of a setting, with who made it (`origin`: `screen`,
+  `adb`, `keys` for an adopted step, `rescaled`), and `volume_slider` when the slider wrote
+  the phone's media volume (`before`, `wanted`, `got`; `result` is `set`, `already`,
+  `skipped` or `refused`, with `why`).
+- `announce_volume_store_error` if storage did not take a note, and `volume_watch_error` if
+  one of the watches for the looks could not be set up.
+- None of these lines carries an address, the name of a device or a text.
+
 ## History of the background-listening increment
 
 On 27 November 2026 agents built a larger increment in a scratch copy that started from an older
@@ -565,7 +896,75 @@ Two reviews of the port, before it reached the phone, changed this:
 
 ## Next steps, in order
 
-1. **The ear test.** It answers the owner's question, and only he can do it:
+1. **The loudness of the announcements, on the phone.** His request, and everything about it
+   is read from the source and untried. The steps for him:
+   [`docs/measurements/lautstaerke.md`](docs/measurements/lautstaerke.md). In this order, and
+   with the journal next to it ("How loud an announcement is", "The instrument"):
+   - *Is the lever the right one?* With the default settings and nothing else playing,
+     "Ansage jetzt": `announce_volume` must read `channel=media governing=3`, and
+     `announce_volume_mid` `musicActive=true`. If it reads `governing=11` or
+     `musicActive=false`, this phone does not put the announcement under the media volume
+     and the design does not hold: stop and report. Then the same in the channel "Assistent"
+     (expected: `governing=11`, `musicActive=false`), to have the comparison.
+   - *Does an announcement played as media come at all from the pocket?* The hourly
+     announcement or a reminder with the phone locked, dark and in Doze, as the one played
+     as assistant speech did on 27 November (`announce_end result=ok`, and heard). By the
+     source it should; if it does not, the channel "Assistent" is the way back.
+   - *What do the steps mean here?* `volume_state` (both volumes, and
+     `manageAssistantAudio`: does the role bring the permission?) and `volume_curve` (the
+     phone's real decibels per step) come by themselves at the first start.
+   - *Does the phone's own slider do it?* Switch off, slider at a few steps: each sample
+     audibly louder, `volume_slider result=set`. Is the highest step loud enough, in a quiet
+     room and outdoors? That decides whether anything beyond a volume is needed.
+   - *The app's own step.* Switch on: `announce_volume action=set` with `mGot` equal to
+     `mWanted`, in every situation an announcement comes in: a sample from the screen, the
+     hourly announcement and a reminder with the phone dark and locked, and in Doze. A
+     `refused` with `why=unknown` there is the background hardening. After each one
+     `announce_volume_restore result=restored note=to_confirm`, the last word as loud as the
+     rest, the phone's media slider where it was, and two seconds later `volume_state
+     trigger=restore_check leftover=confirmed`.
+   - *The keys.* Volume up during an announcement, phone in the pocket:
+     `announce_volume_seen` at the moment of the press, `announce_volume_restore
+     result=adopted`, and the next announcement at the new step.
+   - *Nothing is left raised when the aid goes.* Switch the hearing aid off in the middle of
+     an announcement: nothing from the phone's speaker, `announce_end` with
+     `output_going_away` or `output_lost`, `announce_volume_restore` with
+     `deferred_going_away` or `deferred_route` and **no** `mBack` (nothing was written), the
+     speaker's own volume untouched. After the aid is back: `volume_state trigger=aid_route`
+     with `mIndex` at the announcement's step (the value the Bluetooth stack handed back)
+     and `leftover=restored`, two seconds later `trigger=restore_check leftover=confirmed`,
+     and the media volume for the aid as before. This is the check of point 3 of "What is
+     known", which is read from the source: if the aid comes back at the owner's value
+     without a put-back, the Bluetooth stack behaves differently here. Then once with the
+     aid switched off right after the last word, and once with the app killed in the middle
+     of an announcement (`trigger=app_start`).
+   - *Nothing is left raised when a session takes the route.* Switch on, the hourly
+     announcement or "Ansage jetzt", and tap the hearing aid while it speaks:
+     `announce_end result=output_lost` or `session_busy`, `deferred_route`; after the
+     session `volume_state trigger=voice_link leftover=restored` (or the "Beende" of that
+     session uses the note itself: `announce_volume note=used`). Then start music: as loud
+     as before the announcement.
+   - *Other media.* With music playing: `action=skipped why=other_media`, and the music
+     not louder. And by ear, in both channels: how well is the announcement understood over
+     the music? In the channel "Medien" the music is turned down less (point 9).
+   - *Do Not Disturb* with media muted: the status line says so, nothing is written.
+   - *The lead-in.* A long announcement with 0.45 s, 1.5 s and 3 s in front: does the
+     beginning sound quieter than the rest with the short one?
+   - *The media output changed during the lead-in.* Lead-in 3 s, "Ansage jetzt", and
+     during the silence choose "Dieses Smartphone" in Android's output switcher: listen at
+     the phone. Nothing of the speech may come out of it; expected is `announce_end
+     result=output_lost` before the first word. If a syllable is heard, the guard's blind
+     stretch during the app's own track is real and has to be closed.
+   - *No recording.* Start Android's screen recorder with device audio, play "Erinnerung
+     testen", stop: the recording must be silent where the reminder was, in both channels.
+     And `announce_volume` must still read `governing=3` and the hearing aid's type in
+     `routeTypes` with the capture flag on the attributes.
+   - "Erinnerung testen" with and without an appointment in the next day.
+
+   The whole list of checks, also those that need no app (the audio balance in Android's
+   accessibility settings, the aid's device type in the Bluetooth settings):
+   `docs/research/announce-volume.md`, section 11.
+2. **The ear test.** It answers the owner's question, and only he can do it:
    [`docs/measurements/hoerprobe.md`](docs/measurements/hoerprobe.md). Install the build and look
    for `aid_channels_watching` in the journal. Then, with the phone on vibrate (its own
    click and notification sounds open the same channel) and a radio at a steady level:
@@ -574,8 +973,9 @@ Two reviews of the port, before it reached the phone, changed this:
    sound channel does to the hearing aid" above. The same journal shows whether the reports
    about the media stream reach the app at all (read from the source, not tried). The open
    decisions listed there come after it. If the tap or the announcement does not work at
-   all, the next step comes first.
-2. **Check the ported build on the phone** before anything else is built on it.
+   all, the next step comes first. Do it at one fixed loudness: an announcement that is too
+   quiet to follow says little about the surroundings.
+3. **Check the ported build on the phone** before anything else is built on it.
    In this order: the tap still opens a remote session and "Taste 1 kurz" is still spoken
    (the remote is now heard through the listener's scan); `listener_start` and `scan_started`
    in the journal, the notification "Lara lauscht auf die Fernbedienung"; a press with the
@@ -601,21 +1001,21 @@ Two reviews of the port, before it reached the phone, changed this:
    them); a reminder during a phone call waits (`calendar_waiting why=phone_call`); a tap
    while a reminder is spoken cuts it off; nothing of a title is in the journal. The whole
    list: `docs/design/kalender-ansagen.md`, "Am Gerät noch zu prüfen".
-3. Then measure: can a Shelly press open a session with the phone dark, after minutes and after
+4. Then measure: can a Shelly press open a session with the phone dark, after minutes and after
    hours? Expect trouble from Android 17's scan allowance
    (`scan_allowance_throttling_enabled=true` on this phone; effect unmeasured). Compare the idle
    scan modes and the rescue scan. Hold a button for ten seconds once and look at what arrives:
    a continuous hold could be the reliable wake gesture.
-4. Longer reference series for the remote (30 paced presses, app on screen, passive against
+5. Longer reference series for the remote (30 paced presses, app on screen, passive against
    active scan type), and the same in a session with the phone in a pocket. The count session
    and the adb commands are made for this.
-5. Let the hourly test run for a day and read alarm lateness and outcome per Doze state. The
+6. Let the hourly test run for a day and read alarm lateness and outcome per Doze state. The
    same day gives the phone's own share of channel time ("Zähler heute").
-6. Update the design document to the measurements, then design the spoken menu.
-7. Media keys through `SET_MEDIA_KEY_LISTENER` (adb-grantable, slot was free on this phone).
-8. Hermes: HTTP API server (port 8642, bearer key), not the WebSocket; reach it over WireGuard.
+7. Update the design document to the measurements, then design the spoken menu.
+8. Media keys through `SET_MEDIA_KEY_LISTENER` (adb-grantable, slot was free on this phone).
+9. Hermes: HTTP API server (port 8642, bearer key), not the WebSocket; reach it over WireGuard.
    See `docs/research/verify-hermes-api.md`.
-9. First release: the owner decides when. The secrets are in place.
+10. First release: the owner decides when. The secrets are in place.
 
 Known gaps of the port, none of them urgent: the journal has no size limit and old day files
 are never deleted; `shelly_packet` writes one line per advertisement on the main thread; a tap
@@ -680,3 +1080,56 @@ the app, and whether a report can be held back while the phone sleeps has not be
 it closes; `AidChannels`, the silence test and the changed recovery have no unit tests of
 their own (the decisions of the follow-up and the counting are tested in `core`); the
 journal gains two lines for every sound the phone plays into the hearing aid.
+
+Known gaps of the loudness setting. **Nothing of it has run on the phone**: that an
+announcement played as media is played from the background at all, that Android puts it
+under the media volume there, that the app's write is
+taken from the background, in Doze and from an alarm, that the volume keys reach an
+announcement in the pocket, that half a second before the restore is enough, that the
+report of the hearing aid's media device arrives and a second after it is late enough, that
+the Bluetooth stack takes a new value only for its active device and that an aid on its way
+out is gone from the route within two seconds, that the speech engine keeps the flag
+against recording, all of that is read from the public source of another build. Between
+the question for the output and the write there is a gap no app can close: a hearing aid
+that goes away in exactly that moment gets its value changed on whatever output comes
+next. The note: it is looked at when something tells the app that the route may be back
+(the list is in "How loud an announcement is"), and nothing tells an app that the owner
+unmuted media by hand or chose another output in Android's switcher, so after those two a
+restore that was put off stays undone until the next announcement, the next look from the
+screen or the next of the other occasions; a restore that Android refused is tried again
+at those occasions and not by a timer; a note whose value somebody else happened to set
+again is taken for the app's own, and that includes the two seconds after every restore in
+which the note still stands; keys pressed in the last fifth of a second before a route is
+lost are not seen, and then the step is not taken over and the note does not recognise the
+value; every changed value during an announcement is taken for a key press; and a value
+that Android bent to a third one is put back but not offered as a step. If the stream is
+muted in the very moment of the app's write while a note from an earlier announcement is
+in use, the app cannot tell which of two values stands under the mute and keeps the older
+note. Other media are
+recognised by one question right before the write (`isMusicActive`): music that starts
+during an announcement plays at the announcement's step until the restore. An
+announcement that follows another waits 1.2 s after the end of the first (`OWN_TAIL_MS`),
+because Android counts a track that has just stopped as playing for a moment; whether
+1.2 s is enough on the phone is not measured, and if it is not, the second one stays at
+the phone's value (`why=other_media`). In the channel "Medien" other
+apps' music is turned down by about 14 dB under an announcement instead of 35 dB. With the
+switch on, a step
+below the phone's value makes announcements quieter than the media. The slider of the switch-off mode writes the phone's volume for
+whatever is the media output at the moment of the write; the route is asked right before.
+Played as media, announcements depend on the phone's choice of a media output, and with
+another output chosen there they are skipped, the reminders included; with media muted
+they are silent, and only the journal and the status line say so. During the lead-in and
+the chime the guard does not see a change of the media output that leaves the hearing aid
+connected (3.3 s with the longest lead-in); the speech is stopped at the next look, which
+by the timing of the engine is before its first word, but that is a race and not a
+guarantee. The speech engine is
+told what to play with before every announcement; that it follows from one announcement to
+the next is not tried. The screen reads Android's volumes once a second on the main thread
+while it is visible, and the tap that opens the section "Ansagen" still plays Android's
+click (both left for the redesign of the screen). `AnnounceVolume`, its store, the section
+on the screen and the changed `Announcer` have no unit tests of their own (the decisions are
+tested in `core`); which reason "Erinnerung testen" journals for its sample title
+(`sampleWhy`) is decided in `CalendarReminders` and has no test either.
+The journal gains two lines per announcement with the switch off (`announce_volume`,
+`announce_volume_mid`) and four with it on (also `announce_volume_restore` and the
+`volume_state` of the look that confirms the restore).

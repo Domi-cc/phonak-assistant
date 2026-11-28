@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import io.github.domicc.lara.shelly.ListenerService
+import io.github.domicc.lara.ui.AnnounceSection
 import io.github.domicc.lara.ui.CalendarSection
 import io.github.domicc.lara.ui.CountersSection
 import io.github.domicc.lara.ui.HearingAidDialog
@@ -50,6 +51,7 @@ import io.github.domicc.lara.ui.SetupItem
 import io.github.domicc.lara.ui.SetupSection
 import io.github.domicc.lara.ui.SetupStatus
 import io.github.domicc.lara.ui.ShellySection
+import io.github.domicc.lara.ui.announceSummary
 import io.github.domicc.lara.ui.calendarSummary
 import io.github.domicc.lara.ui.countersSummary
 import io.github.domicc.lara.ui.setupSummary
@@ -59,7 +61,8 @@ import kotlinx.coroutines.launch
 
 /**
  * The only screen. Upper part: sections that fold and scroll (setup checklist, starting a
- * session or an announcement, the calendar reminders, today's counters, the remote, settings).
+ * session or an announcement, how loud announcements are, the calendar reminders, today's
+ * counters, the remote, settings).
  * Lower part: the live journal, which stays visible whatever is open above it.
  */
 class MainActivity : ComponentActivity() {
@@ -83,13 +86,15 @@ class MainActivity : ComponentActivity() {
      * permission the listener needs may have been granted in Android's settings in the
      * meantime, and nothing tells the app about that. Costs one journal line if it runs.
      * The same goes for the permission to read the calendar, and for the watch of the sound
-     * channels to the hearing aid, which needs the permission for nearby devices too.
+     * channels to the hearing aid, which needs the permission for nearby devices too. And the
+     * journal gets the state of the volumes the owner is about to look at.
      */
     override fun onStart() {
         super.onStart()
         ListenerService.start(this, "main_activity")
         LaraApp.instance.calendar.onScreen()
         LaraApp.instance.channels.onScreen()
+        LaraApp.instance.volume.onScreen()
     }
 }
 
@@ -104,6 +109,9 @@ private fun MainScreen(lifecycle: Lifecycle) {
     val today by app.counters.today.collectAsState()
     val remote by app.shellyStore.remote.collectAsState()
     val calendar by app.calendar.status.collectAsState()
+    val announce by app.volume.store.settings.collectAsState()
+    // Android's volumes, for the section "Ansagen" and its summary; nothing tells an app when they change
+    var volumes by remember { mutableStateOf(app.volume.live()) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -118,6 +126,7 @@ private fun MainScreen(lifecycle: Lifecycle) {
             launch {
                 while (true) {
                     items = SetupStatus.read(context)
+                    volumes = app.volume.live()
                     delay(1_000)
                 }
             }
@@ -178,6 +187,9 @@ private fun MainScreen(lifecycle: Lifecycle) {
                         SetupSection(items, ::fix)
                     }
                     Section("Starten") { MeasureSection() }
+                    Section("Ansagen", announceSummary(announce, volumes), startOpen = false) {
+                        AnnounceSection(volumes) { volumes = app.volume.live() }
+                    }
                     Section("Kalender", calendarSummary(calendar), startOpen = false) { CalendarSection() }
                     Section("Zähler heute", countersSummary(today), startOpen = false) { CountersSection() }
                     Section(

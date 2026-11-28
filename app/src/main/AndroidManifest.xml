@@ -21,6 +21,13 @@
     <!-- For the spoken reminders before appointments. Asked for when the owner switches them
          on; until then the app reads nothing from the calendar. -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- Declared only to learn something: the journal line `volume_state` says whether Android
+         grants this to a sideloaded app that holds the assistant role. It would let an app set
+         Android's assistant volume. The app does not use it in this build and sets that
+         volume nowhere. -->
+    <uses-permission
+        android:name="android.permission.MANAGE_ASSISTANT_AUDIO"
+        tools:ignore="ProtectedPermissions" />
     <!-- Development permission. Has no effect until the owner runs:
          adb shell pm grant io.github.domicc.lara android.permission.SET_MEDIA_KEY_LISTENER -->
     <uses-permission

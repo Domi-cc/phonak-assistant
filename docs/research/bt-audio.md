@@ -495,7 +495,7 @@ Meaning for speech recognition [I]:
 | Other media apps | While SCO is active, A2DP devices are removed from routing and media/assistant strategies are sent to the SCO device: a running podcast would continue on the call link in call quality. [V] Take `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE` so players pause, and release it at session end so they resume. | Our prompt mixes into the same A2DP stream. Use `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` (music ducks) or `..._TRANSIENT` (music pauses). [I] |
 | Phone calls | A real call takes the SCO link away. "NOT returned automatically when the call ends." [V] | A real call suspends A2DP. [I] |
 | Radio-level privacy | uplink from the aid's microphones is on air for the whole session [I] | no uplink |
-| Volume control | call volume, synchronised with the aid's speaker gain [V] | media volume |
+| Volume control | call volume, synchronised with the aid's speaker gain [V] | media volume. **Corrected on 28 November 2026:** only for sound played with a media usage. With `USAGE_ASSISTANT`, the usage this report recommends for an announcement, Android 17 uses a separate assistant volume that the media volume does not move; see [announce-volume.md](announce-volume.md) |
 | Android 17 background rules | playback hardening applies to every usage alike (section 5.2) [V] | same |
 
 ### 4.2 Why SCO for the whole session in v1

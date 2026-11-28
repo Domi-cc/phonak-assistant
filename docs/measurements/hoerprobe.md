@@ -6,7 +6,7 @@
 
 Die App soll das Hörgerät nicht bei seiner eigentlichen Aufgabe stören: die Umgebung zu verstärken.
 
-Bekannt ist aus dem Code, aus Phonaks Unterlagen und aus dem Android-Quelltext: Die App hat keinen Befehl, mit dem sie am Hörgerät etwas umschaltet, und sie verstellt keine Lautstärke. Aber jeder Ton vom Telefon, auch eine Ansage der App, lässt das Hörgerät von selbst in ein Streaming-Programm wechseln und danach wieder zurück. Laut Phonak bleiben die Mikrofone dabei in der Standardeinstellung an. Wie laut die Umgebung in dieser Zeit bleibt und wie lange der Weg zurück dauert, steht nirgends. Das kann nur das Ohr sagen. Alles Übrige schreibt die App jetzt mit.
+Bekannt ist aus dem Code, aus Phonaks Unterlagen und aus dem Android-Quelltext: Die App hat keinen Befehl, mit dem sie am Hörgerät etwas umschaltet. Am Hörgerät verstellt sie auch keine Lautstärke; seit dem Abschnitt „Ansagen“ kann sie die Medienlautstärke des Telefons stellen, siehe [`lautstaerke.md`](lautstaerke.md). Aber jeder Ton vom Telefon, auch eine Ansage der App, lässt das Hörgerät von selbst in ein Streaming-Programm wechseln und danach wieder zurück. Laut Phonak bleiben die Mikrofone dabei in der Standardeinstellung an. Wie laut die Umgebung in dieser Zeit bleibt und wie lange der Weg zurück dauert, steht nirgends. Das kann nur das Ohr sagen. Alles Übrige schreibt die App jetzt mit.
 
 Die Quellen dazu: [`../research/hearing-function.md`](../research/hearing-function.md) (englisch).
 

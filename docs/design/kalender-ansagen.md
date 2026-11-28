@@ -69,8 +69,9 @@ Auf dem Bildschirm gibt es den Abschnitt „Kalender“. Zugeklappt zeigt er in 
 - die Zeile „Nächste Ansage“ mit Uhrzeit und Titel, oder „keine in den nächsten 24 Stunden“,
 - die Liste der Kalender mit Haken, darunter klein das Konto,
 - der Knopf „Nächsten Termin jetzt ansagen“. Er sagt sofort den nächsten Termin der kommenden 24 Stunden an, zum Beispiel „Nächster Termin um 14 Uhr 30: Zahnarzt“ oder „Nächster Termin morgen um 9 Uhr: Zahnarzt“ (kurz vor Mitternacht kann es auch „übermorgen“ heißen). Gibt es keinen, sagt er „Kein Termin in den nächsten 24 Stunden“. Damit lässt sich prüfen, wie eine Ansage klingt und ob die richtigen Kalender gelesen werden. Während einer Sitzung oder eines Telefonats sagt der Knopf nichts.
+- der Knopf „Erinnerung testen“ (seit dem Build mit dem Abschnitt „Ansagen“). Er spielt die Erinnerung für den nächsten Termin genau so, wie sie zehn Minuten vorher klingt: „In 10 Minuten: Zahnarzt“. Gibt es in den nächsten 24 Stunden keinen Termin, sind die Ansagen aus, fehlt die Berechtigung oder lässt sich der Kalender nicht lesen, sagt er denselben Satz mit „Beispieltermin“; bei ausgeschalteten Ansagen fasst er den Kalender nicht an. Der Knopf ist immer da, auch wenn „Termine ansagen“ aus ist, und ändert nichts an dem, was geplant oder gemerkt ist. Wie laut eine Ansage ist, stellt der Abschnitt „Ansagen“ ein: [`../measurements/lautstaerke.md`](../measurements/lautstaerke.md).
 
-Über adb nennt `lara.STATUS` den Zustand als `calendar=off`, `on` oder `no_permission`. `lara.CALENDAR` plant neu und antwortet mit Zahlen. Beides steht in [`docs/adb-control.md`](../adb-control.md).
+Über adb nennt `lara.STATUS` den Zustand als `calendar=off`, `on` oder `no_permission`. `lara.CALENDAR` plant neu und antwortet mit Zahlen. `lara.REHEARSE` entspricht dem Knopf „Erinnerung testen“. Alles steht in [`docs/adb-control.md`](../adb-control.md).
 
 ## Was im Protokoll steht
 
@@ -88,7 +89,7 @@ Auf dem Bildschirm gibt es den Abschnitt „Kalender“. Zugeklappt zeigt er in 
 | `calendar_provider_error` | Der Kalenderspeicher ließ sich nicht lesen (nur die Art des Fehlers; `why=timeout`, wenn er nicht geantwortet hat). |
 | `calendar_plan_timeout` | Der Wecker hat geklingelt, aber die Planung war nach 8 Sekunden nicht fertig. Sie kann noch folgen. |
 | `calendar_observer` | Die App lässt sich Änderungen am Kalender melden, oder nicht mehr. |
-| `calendar_test`, `calendar_test_skipped` | Der Knopf „Nächsten Termin jetzt ansagen“. |
+| `calendar_test`, `calendar_test_skipped` | Der Knopf „Nächsten Termin jetzt ansagen“. Mit `kind=rehearsal` der Knopf „Erinnerung testen“: `events` (wie viele Termine genannt werden), `sample` (ob „Beispieltermin“ gesagt wurde) mit `sampleWhy` (`switched_off`, `no_permission`, `unreadable`, `no_event`) und `textLength`. Die Ansage selbst steht mit `reason=calendar_rehearsal` in den `announce_`-Zeilen. |
 | `calendar_plan_error` | Eine Planung ist unerwartet gescheitert (nur die Art des Fehlers). Danach folgt `calendar_plan` mit `readable=false` und dem Wecker für den nächsten Versuch. |
 | `calendar_store_error` | Die App konnte sich eine Ansage nicht dauerhaft merken. Nach einem Neustart könnte sie wiederholt werden. |
 

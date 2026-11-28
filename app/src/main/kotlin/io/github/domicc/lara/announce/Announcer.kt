@@ -19,18 +19,27 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import io.github.domicc.lara.audio.HeadsetLink
 import io.github.domicc.lara.audio.Tones
+import io.github.domicc.lara.core.announce.AnnounceTexts
 import io.github.domicc.lara.journal.Journal
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
+
+/** Whether [outputs] is the media channel of the hearing aid with [address] and nothing besides. */
+internal fun onlyTheAid(outputs: List<AudioDeviceInfo>, address: String): Boolean =
+    outputs.isNotEmpty() && outputs.all {
+        it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP && it.address.equals(address, ignoreCase = true)
+    }
 
 /**
  * Says something into the hearing aid without being asked: a short chime, then speech, over the
@@ -49,21 +58,38 @@ import java.util.Locale
  *
  * The same checks and the same guard serve the silence test ([playSilence]), which opens the
  * media channel with nothing audible in it.
+ *
+ * What an announcement is played as is a setting ("Lautstärke-Kanal",
+ * [io.github.domicc.lara.core.announce.AnnounceChannel]): as media, which is the default, or
+ * as assistant speech, which is what every build before the setting did. Android decides by
+ * that under which of its volumes the sound runs, and also where it goes: played as media,
+ * an announcement follows the phone's choice of a media output, and with "Dieses
+ * Smartphone" chosen there the checks here skip it. The choice is read when it is an
+ * announcement's turn and holds for all of it: chime and speech are played with the same
+ * attributes, and every question about the output (the checks before, the guard, the audio
+ * focus) is asked with them.
+ *
+ * How loud it is, is the business of [AnnounceVolume]: asked once before the first sound
+ * ([AnnounceVolume.before]) and once after the last ([AnnounceVolume.after]), whichever way
+ * the announcement ends. In between the guard lets it look at the volume every time it looks
+ * at the output itself ([AnnounceVolume.watch]).
+ *
+ * The request for the audio focus carries the attributes of the announcement, like
+ * everything else of it. That has a price in the media channel: Android turns other apps'
+ * music down by about 35 dB under a request made as an assistant and by about 14 dB under
+ * any other (read from the Android 17 source), so an announcement over music is harder to
+ * follow there than it was.
  */
 class Announcer(
     private val context: Context,
     private val journal: Journal,
     private val headsetLink: HeadsetLink,
+    private val volume: AnnounceVolume,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val audio = context.getSystemService(AudioManager::class.java)
     private val oneAtATime = Mutex()
     private var engine: TextToSpeech? = null
-
-    private val attributes: AudioAttributes = AudioAttributes.Builder()
-        .setUsage(AudioAttributes.USAGE_ASSISTANT)
-        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-        .build()
 
     /**
      * The reason of the announcement that plays right now, from its first sound to its end;
@@ -97,7 +123,7 @@ class Announcer(
         // The alarm that leads here does not keep the phone awake for the asynchronous part.
         val wakeLock = context.getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "lara:announce")
-            .apply { acquire(MAX_DURATION_MS + 5_000) }
+            .apply { acquire(MAX_DURATION_MS + WAKE_MARGIN_MS) }
         scope.launch {
             try {
                 oneAtATime.withLock { speak(text, reason, logText, stopIf) }
@@ -110,60 +136,111 @@ class Announcer(
         }
     }
 
+    /**
+     * Plays the loudness sample "Lautstärke Stufe N" after a move of the slider: an
+     * announcement like every other, with its own reason, so that it takes the same checks,
+     * the same volume step, the same guard and the same restore. Only the newest sample
+     * plays: one that still waits behind another announcement is dropped, and one that
+     * plays is cut off by the next.
+     */
+    fun sample(step: Int) = announce(AnnounceTexts.sample(step), AnnounceTexts.SAMPLE_REASON, stopIf = volume.newestSample())
+
     @SuppressLint("MissingPermission")
     private suspend fun speak(text: String, reason: String, logText: Boolean, stopIf: (() -> String?)?) {
         val startedAt = SystemClock.elapsedRealtime()
         fun ms() = SystemClock.elapsedRealtime() - startedAt
-        fun skipped(why: String, more: Map<String, Any?> = emptyMap()) =
+        fun skipped(why: String, more: Map<String, Any?> = emptyMap()) {
             journal.log("announce_skipped", mapOf("reason" to reason, "why" to why) + more)
+            volume.notPlayed(reason, why)
+        }
 
+        // What this announcement is played as, and with how much silence in front of it:
+        // read now, when it is its turn, and the same for all of it.
+        val settings = volume.store.settings.value
+        val channel = settings.channel
+        val leadInMs = settings.leadIn.ms
+        val attributes = volume.attributes(channel)
+
+        // Android counts a track that has just stopped as playing until its buffers have
+        // played out, a few hundred milliseconds and more over Bluetooth. The volume step
+        // would take this app's own sound of a moment ago for somebody's music and leave
+        // the volume alone (`why=other_media`): two moves of the slider in a row would do
+        // it. So an announcement right behind another one waits that tail out first.
+        lastEnded?.let { delay(OWN_TAIL_MS - (SystemClock.elapsedRealtime() - it.elapsedMs)) }
         // An announcement that had to wait for the one before it may have been overtaken.
         stopIf?.invoke()?.let { return skipped(it) }
         if (headsetLink.store.address == null) return skipped("no_hearing_aid_selected")
         val headset = headsetLink.await(2_000)
         val aid = headset?.let { headsetLink.hearingAid(it) } ?: return skipped("hearing_aid_not_connected")
         // Where would Android play this right now?
-        val outputs = outputs()
+        val outputs = outputs(attributes)
         if (!onlyTheAid(outputs, aid.address)) {
-            return skipped("output_is_not_the_hearing_aid", mapOf("outputTypes" to outputs.map { it.type }))
+            return skipped("output_is_not_the_hearing_aid", mapOf("outputTypes" to outputs.map { it.type }, "channel" to channel.word))
         }
         val output = outputs.first()
 
         val tts = engine() ?: return skipped("no_speech_engine")
-        // The first start of the engine in a process can take seconds. The hearing aid may
-        // have gone in that time, or a second device may have connected: ask again.
-        stopIf?.invoke()?.let { return skipped(it) }
-        val again = outputs()
-        if (!onlyTheAid(again, aid.address)) return skipped("output_changed", mapOf("outputTypes" to again.map { it.type }))
-
-        val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-            .setAudioAttributes(attributes)
-            .build()
-        val focusGranted = audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-        journal.log(
-            "announce_start",
-            mapOf(
-                "reason" to reason,
-                if (logText) "text" to text else "textLength" to text.length,
-                "focusGranted" to focusGranted,
-                "musicActive" to audio.isMusicActive,
-            ),
-        )
         // How the announcement ended. Whoever completes it first decides, and the guard does
         // so the moment the sound is no longer the hearing aid's alone.
         val done = CompletableDeferred<String>()
-        val guard = OutputGuard(aid.address, stopIf) { why -> if (done.complete(why)) tts.stop() }
+        val guard = OutputGuard(aid.address, attributes, stopIf) { why -> if (done.complete(why)) tts.stop() }
+        // completed at the first word
+        val speaking = CompletableDeferred<Unit>()
+        var midLook: Job? = null
+        var focus: AudioFocusRequest? = null
+        var sounding = false
+        var result: String? = null
+        // The first start of the engine in a process can take seconds. The hearing aid may
+        // have gone in that time, or a second device may have connected: ask again.
+        stopIf?.invoke()?.let { return skipped(it) }
+        val again = outputs(attributes)
+        if (!onlyTheAid(again, aid.address)) return skipped("output_changed", mapOf("outputTypes" to again.map { it.type }))
+
+        // The volume, in the same slice of the main thread as the check above: nothing
+        // suspends between that check and the write. Before the audio focus and before the
+        // lead-in silence, so that the value stands when the stream opens.
+        val applied = volume.before(reason, channel, attributes, silence = false)
+        // From here on whatever happens ends in the finally block: the volume step may have
+        // changed the phone's media volume, and that has to be put back on every way out.
         try {
+            if (applied.routeLost) {
+                // the volume step asked the route once more, and the hearing aid was gone
+                return skipped("output_changed", mapOf("outputTypes" to outputs(attributes).map { it.type }, "at" to "volume"))
+            }
+            // Half a second into the speech the journal gets a look at the volumes.
+            midLook = scope.launch {
+                speaking.await()
+                delay(MID_LOOK_MS)
+                volume.mid(reason)
+            }
+            focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(attributes)
+                .build()
+            val focusGranted = audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            journal.log(
+                "announce_start",
+                mapOf(
+                    "reason" to reason,
+                    if (logText) "text" to text else "textLength" to text.length,
+                    "focusGranted" to focusGranted,
+                    "musicActive" to audio.isMusicActive,
+                    "channel" to channel.word,
+                    "leadInMs" to leadInMs,
+                    "chimeAmplitude" to CHIME_AMPLITUDE,
+                ),
+            )
             playing = reason
+            sounding = true
             guard.start()
             // The chime opens the stream to the hearing aid, so that the speech is not clipped.
-            playChime(output, done)
+            playChime(output, attributes, leadInMs, done)
             // once more by hand: the guard looks every [WATCH_MS], and the title comes now
             guard.check()
             if (!done.isCompleted) {
                 tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
                         journal.log("announce_speaking", mapOf("reason" to reason, "ms" to ms()))
+                        speaking.complete(Unit)
                     }
 
                     override fun onDone(utteranceId: String?) {
@@ -179,17 +256,37 @@ class Announcer(
                         done.complete("engine_error_$errorCode")
                     }
                 })
-                val queued = tts.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), "announce-" + startedAt)
-                if (queued != TextToSpeech.SUCCESS) done.complete("engine_refused")
+                // Before every speak, with this announcement's attributes: the engine keeps
+                // what it was given last, and that may be the other channel's. Speech with
+                // other attributes than the guard watches could go where nobody looks.
+                if (tts.setAudioAttributes(attributes) != TextToSpeech.SUCCESS) {
+                    done.complete("engine_attributes_refused")
+                } else {
+                    val queued = tts.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), "announce-" + startedAt)
+                    if (queued != TextToSpeech.SUCCESS) done.complete("engine_refused")
+                }
             }
-            val result = withTimeoutOrNull(MAX_DURATION_MS) { done.await() } ?: "timeout"
+            val ending = withTimeoutOrNull(MAX_DURATION_MS) { done.await() } ?: "timeout"
+            result = ending
             // After this nobody watches the output any more, so the engine must not speak on.
-            if (result == "timeout") tts.stop()
-            journal.log("announce_end", mapOf("reason" to reason, "result" to result, "ms" to ms()))
+            if (ending == "timeout") tts.stop()
+            journal.log("announce_end", mapOf("reason" to reason, "result" to ending, "ms" to ms()))
         } finally {
-            ended(reason)
+            if (sounding) ended(reason)
             guard.stop()
-            audio.abandonAudioFocusRequest(focus)
+            midLook?.cancel()
+            // only now can the screen say whether it was played, and how it ended
+            volume.ended(reason, result)
+            // The phone's media volume back, if the volume step changed it: after the last
+            // word, before the audio focus is given back and while the wake lock still
+            // holds. Not to be cancelled: a coroutine that is cancelled would be thrown out
+            // at the wait in there, and the owner's music would stay at the loudness of an
+            // announcement.
+            try {
+                withContext(NonCancellable) { volume.after(applied, result) }
+            } finally {
+                focus?.let { audio.abandonAudioFocusRequest(it) }
+            }
         }
     }
 
@@ -234,27 +331,40 @@ class Announcer(
         fun skipped(why: String, more: Map<String, Any?> = emptyMap()) =
             journal.log("announce_skipped", mapOf("reason" to reason, "why" to why) + more)
 
+        // played as an announcement is played, so that it opens the same stream
+        val channel = volume.store.settings.value.channel
+        val attributes = volume.attributes(channel)
+
         // The questions [speak] asks before its first sound, word for word. Silence that came
         // out of the phone's speaker would harm nobody, but the test would then say nothing
         // about the hearing aid.
         if (headsetLink.store.address == null) return skipped("no_hearing_aid_selected")
         val headset = headsetLink.await(2_000)
         val aid = headset?.let { headsetLink.hearingAid(it) } ?: return skipped("hearing_aid_not_connected")
-        val outputs = outputs()
+        val outputs = outputs(attributes)
         if (!onlyTheAid(outputs, aid.address)) {
-            return skipped("output_is_not_the_hearing_aid", mapOf("outputTypes" to outputs.map { it.type }))
+            return skipped("output_is_not_the_hearing_aid", mapOf("outputTypes" to outputs.map { it.type }, "channel" to channel.word))
         }
+        // Never writes a volume for silence; the journal still gets the line with the
+        // volumes the stream is opened under.
+        volume.before(reason, channel, attributes, silence = true)
         journal.log(
             "announce_start",
-            // musicActive: other media was playing already, so the stream was open anyway
-            mapOf("reason" to reason, "silence" to true, "durationMs" to ms, "musicActive" to audio.isMusicActive),
+            mapOf(
+                "reason" to reason,
+                "silence" to true,
+                "durationMs" to ms,
+                // other media was playing already, so the stream was open anyway
+                "musicActive" to audio.isMusicActive,
+                "channel" to channel.word,
+            ),
         )
         val done = CompletableDeferred<String>()
-        val guard = OutputGuard(aid.address, null) { why -> done.complete(why) }
+        val guard = OutputGuard(aid.address, attributes, null) { why -> done.complete(why) }
         try {
             playing = reason
             guard.start()
-            play(Tones.silence(ms), outputs.first(), done)
+            play(Tones.silence(ms), outputs.first(), attributes, done)
             // completed only by the guard: then the output changed on the way
             val result = if (done.isCompleted) done.await() else "ok"
             journal.log(
@@ -267,13 +377,8 @@ class Announcer(
         }
     }
 
-    private fun outputs(): List<AudioDeviceInfo> = audio.getAudioDevicesForAttributes(attributes)
-
-    /** Whether [outputs] is the media channel of the hearing aid with [address] and nothing besides. */
-    private fun onlyTheAid(outputs: List<AudioDeviceInfo>, address: String): Boolean =
-        outputs.isNotEmpty() && outputs.all {
-            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP && it.address.equals(address, ignoreCase = true)
-        }
+    /** Where Android would play a sound with [attributes] right now. */
+    private fun outputs(attributes: AudioAttributes): List<AudioDeviceInfo> = audio.getAudioDevicesForAttributes(attributes)
 
     /**
      * Watches, from the chime to the last word, that the sound still goes to the hearing aid
@@ -294,11 +399,23 @@ class Announcer(
      *
      * Everything here runs on the main thread.
      *
+     * A limit, read from the Android 17 source and not measured: while the app's own
+     * track plays (the lead-in silence and the chime), that track is tied to the hearing aid,
+     * and Android answers the question for the output with the tie of the tracks that play,
+     * as long as all of them have one. A change of the route that leaves the hearing aid
+     * connected (the owner picks "Dieses Smartphone" in the output switcher during the
+     * lead-in) is therefore not seen before the chime is over: the check by hand after the
+     * chime or the next look, [WATCH_MS] later, stops the speech then, normally before the
+     * engine has brought out its first word. A hearing aid that goes away is seen at once.
+     * A lead-in of 3 s makes that blind stretch 3.3 s long instead of 0.7 s.
+     *
+     * @param attributes what the announcement is played with: the output is asked for these
      * @param stopIf the caller's own reason to stop, see [announce]
      * @param lost called with the reason, possibly more than once, between [start] and [stop]
      */
     private inner class OutputGuard(
         private val aidAddress: String,
+        private val attributes: AudioAttributes,
         private val stopIf: (() -> String?)?,
         private val lost: (String) -> Unit,
     ) {
@@ -332,8 +449,11 @@ class Announcer(
             // A report that Android had on its way when the guard was switched off must not
             // stop the announcement after this one: they share the engine.
             if (watching == null) return
-            val why = stopIf?.invoke() ?: if (onlyTheAid(outputs(), aidAddress)) null else "output_lost"
+            val why = stopIf?.invoke() ?: if (onlyTheAid(outputs(attributes), aidAddress)) null else "output_lost"
             if (why != null) lost(why)
+            // While the app looks after the volume of this announcement it reads it at
+            // every look: the volume keys may have changed it. Does nothing otherwise.
+            else volume.watch()
         }
 
         fun stop() {
@@ -346,19 +466,21 @@ class Announcer(
     }
 
     /**
-     * A short pause, then one soft tone, played by this app on the same output.
+     * A pause, then one soft tone, played by this app on the same output.
      *
+     * @param leadInMs the length of the pause, the setting "Vorlauf vor der Ansage"
      * @param stop ends the chime early: the stream is tied to [output], but if that device
      * goes away Android plays the rest wherever it likes
      */
-    private suspend fun playChime(output: AudioDeviceInfo, stop: CompletableDeferred<String>) =
-        play(Tones.silence(STREAM_WARM_UP_MS) + Tones.tone(659.0, 160, volume = 0.25) + Tones.silence(120), output, stop)
+    private suspend fun playChime(output: AudioDeviceInfo, attributes: AudioAttributes, leadInMs: Int, stop: CompletableDeferred<String>) =
+        play(Tones.silence(leadInMs) + Tones.tone(659.0, 160, volume = CHIME_AMPLITUDE) + Tones.silence(120), output, attributes, stop)
 
     /**
-     * Plays [pcm] on [output], by this app, and returns when it is through or [stop] is
-     * completed. What the chime is played with, and the silence of the silence test.
+     * Plays [pcm] on [output] with [attributes], by this app, and returns when it is through
+     * or [stop] is completed. What the chime is played with, and the silence of the silence
+     * test.
      */
-    private suspend fun play(pcm: ShortArray, output: AudioDeviceInfo, stop: CompletableDeferred<String>) {
+    private suspend fun play(pcm: ShortArray, output: AudioDeviceInfo, attributes: AudioAttributes, stop: CompletableDeferred<String>) {
         val track = AudioTrack.Builder()
             .setAudioAttributes(attributes)
             .setAudioFormat(
@@ -394,7 +516,7 @@ class Announcer(
             return null
         }
         val language = tts.setLanguage(Locale.GERMANY)
-        tts.setAudioAttributes(attributes)
+        // what it plays with is set before every speak: it differs between announcements
         journal.log("announce_engine", mapOf("status" to "ready", "german" to language, "engine" to tts.defaultEngine))
         if (language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED) {
             tts.shutdown()
@@ -407,7 +529,26 @@ class Announcer(
     private companion object {
         const val MAX_DURATION_MS = 20_000L
         const val ENGINE_TIMEOUT_MS = 6_000L
-        const val STREAM_WARM_UP_MS = 450
+
+        /**
+         * How much longer than [MAX_DURATION_MS] the wake lock of an announcement lasts at
+         * most: for the wait for the hands-free service and the speech engine before the
+         * first sound, the longest lead-in, and the restore of the volume after the last.
+         */
+        const val WAKE_MARGIN_MS = 15_000L
+
+        /** The level of the chime, as a share of full scale. Journaled with every announcement. */
+        const val CHIME_AMPLITUDE = 0.25
+
+        /** How long after the first word the journal looks at the volumes. */
+        const val MID_LOOK_MS = 500L
+
+        /**
+         * How long after the end of one announcement the next one waits before it asks
+         * whether other media is playing. Read from the Android source, not measured: a
+         * stopped track stays "active" for its buffer and the latency of the output.
+         */
+        const val OWN_TAIL_MS = 1_200L
 
         /** How often the guard asks where the sound goes while an announcement plays. */
         const val WATCH_MS = 200L

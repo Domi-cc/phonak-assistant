@@ -1,11 +1,6 @@
 package io.github.domicc.lara.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -76,17 +71,3 @@ fun SettingsSection() {
 @Composable
 private fun ModeRow(label: String, detail: String, selected: ScanMode, onSelect: (ScanMode) -> Unit) =
     ChoiceRow(label, detail, ScanMode.entries.map { it to modeLabel(it) }, selected, onSelect)
-
-/** A setting with a few values to choose from, each with the word the screen uses for it. */
-@Composable
-private fun <T> ChoiceRow(label: String, detail: String, options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            options.forEach { (value, word) ->
-                FilterChip(selected = value == selected, onClick = { onSelect(value) }, label = { Text(word) })
-            }
-        }
-    }
-}

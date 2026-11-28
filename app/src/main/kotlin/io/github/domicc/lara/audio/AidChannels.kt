@@ -444,17 +444,17 @@ class AidChannels(
 
         /** How much longer than the last look the follow-up's wake lock lasts at most. */
         const val FOLLOW_UP_WAKE_MARGIN_MS = 5_000L
-
-        /** `AudioManager.mode` as a word; a mode this build does not know as its number. */
-        fun modeWord(mode: Int): String = when (mode) {
-            AudioManager.MODE_NORMAL -> "normal"
-            AudioManager.MODE_RINGTONE -> "ringtone"
-            AudioManager.MODE_IN_CALL -> "in_call"
-            AudioManager.MODE_IN_COMMUNICATION -> "in_communication"
-            AudioManager.MODE_CALL_SCREENING -> "call_screening"
-            AudioManager.MODE_CALL_REDIRECT -> "call_redirect"
-            AudioManager.MODE_COMMUNICATION_REDIRECT -> "communication_redirect"
-            else -> mode.toString()
-        }
     }
+}
+
+/** `AudioManager.mode` as a word for the journal; a mode this build does not know as its number. */
+internal fun modeWord(mode: Int): String = when (mode) {
+    AudioManager.MODE_NORMAL -> "normal"
+    AudioManager.MODE_RINGTONE -> "ringtone"
+    AudioManager.MODE_IN_CALL -> "in_call"
+    AudioManager.MODE_IN_COMMUNICATION -> "in_communication"
+    AudioManager.MODE_CALL_SCREENING -> "call_screening"
+    AudioManager.MODE_CALL_REDIRECT -> "call_redirect"
+    AudioManager.MODE_COMMUNICATION_REDIRECT -> "communication_redirect"
+    else -> mode.toString()
 }
